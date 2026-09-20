@@ -12,13 +12,32 @@ CREATE TABLE IF NOT EXISTS accounts (
   name TEXT NOT NULL,
   type TEXT NOT NULL,
   bank TEXT,
+  bank_address TEXT,
+  manager_name TEXT,
   iban TEXT,
+  rib TEXT,
+  contract_filename TEXT,
+  contract_path TEXT,
+  contract_mime TEXT,
+  bankin_connected BOOLEAN NOT NULL DEFAULT false,
+  bankin_account_id TEXT,
+  last_synced_at TIMESTAMPTZ,
   initial_balance NUMERIC(14,2) NOT NULL DEFAULT 0,
   currency CHAR(3) NOT NULL DEFAULT 'EUR',
   active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS bank_address TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS manager_name TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS rib TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS contract_filename TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS contract_path TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS contract_mime TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS bankin_connected BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS bankin_account_id TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS categories (
   id UUID PRIMARY KEY,

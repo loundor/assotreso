@@ -26,6 +26,13 @@
   let projects: Project[] = [];
   let categories: Category[] = [];
   let allocationRows: Array<{ projectId: string; categoryId: string; amount: number }> = [];
+
+  let detailOpen = false;
+  let detailLoading = false;
+  let detailError = '';
+  let detailedInvoice: Invoice | null = null;
+  let detailedAllocations: InvoiceAllocation[] = [];
+
   $: allocationTotal = allocationRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
   $: invoiceTotal = Math.abs(Number(editedInvoice?.totalTtc ?? editedInvoice?.total ?? 0));
   $: allocationRemaining = Math.max(0, invoiceTotal - allocationTotal);
@@ -121,9 +128,33 @@
     finally { allocationSaving = false; }
   }
 
+  async function showVentilationDetails(invoice: Invoice) {
+    detailOpen = true;
+    detailLoading = true;
+    detailError = '';
+    detailedInvoice = invoice;
+    try {
+      const detail = await api.get<{ invoice: Invoice }>(`invoices/${invoice.id}`);
+      detailedInvoice = detail.invoice;
+      detailedAllocations = (detail.invoice.allocations ?? []) as InvoiceAllocation[];
+    } catch (caught) {
+      detailError = getErrorMessage(caught);
+    } finally {
+      detailLoading = false;
+    }
+  }
+
+  function closeVentilationDetails() {
+    detailOpen = false;
+    detailedInvoice = null;
+    detailedAllocations = [];
+    detailError = '';
+  }
+
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape' && previewOpen) closePreview();
     else if (event.key === 'Escape' && allocationOpen) closeAllocations();
+    else if (event.key === 'Escape' && detailOpen) closeVentilationDetails();
   }
 
   onMount(() => {
@@ -168,7 +199,30 @@
                 <td data-label="Date">{formatDate(invoice.date)}</td>
                 <td data-label="Tiers"><strong>{invoice.supplier || invoice.recipient || '—'}</strong></td>
                 <td data-label="N°">{invoice.number || '—'}</td>
-                <td data-label="Ventilation"><span class="status-badge">{(invoice.remainingAmount ?? invoice.remaining_amount ?? 0) <= 0 ? 'Complète' : (invoice.allocatedAmount ?? invoice.allocated_amount ?? 0) > 0 ? 'Partielle' : 'Non affectée'}</span><small>{currency.format(invoice.allocatedAmount ?? invoice.allocated_amount ?? 0)} affectés</small></td>
+                <td data-label="Ventilation">
+                  {#if (invoice.remainingAmount ?? invoice.remaining_amount ?? 0) <= 0}
+                    <button
+                      type="button"
+                      class="status-badge badge-green badge-clickable"
+                      title="Cliquer pour voir le détail de la ventilation"
+                      on:click={() => showVentilationDetails(invoice)}
+                    >
+                      Complète
+                    </button>
+                  {:else if (invoice.allocatedAmount ?? invoice.allocated_amount ?? 0) > 0}
+                    <button
+                      type="button"
+                      class="status-badge badge-blue badge-clickable"
+                      title="Cliquer pour voir le détail de la ventilation"
+                      on:click={() => showVentilationDetails(invoice)}
+                    >
+                      Partielle
+                    </button>
+                  {:else}
+                    <span class="status-badge badge-orange" title="Ventilation non effectuée">Non affectée</span>
+                  {/if}
+                  <small>{currency.format(invoice.allocatedAmount ?? invoice.allocated_amount ?? 0)} affectés</small>
+                </td>
                 <td data-label="Traité" class="align-center">
                   {#if invoice.isReconciled || invoice.reconciled || invoice.is_reconciled || invoice.transaction_id || invoice.transactionId}
                     <span class="traite-icon" title="Rapprochement bancaire effectué">
@@ -200,6 +254,56 @@
     border-radius: 99px;
     width: 26px;
     height: 26px;
+  }
+  .badge-clickable {
+    cursor: pointer;
+    border: none;
+    font-family: inherit;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  .badge-clickable:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  }
+  .badge-green {
+    background: #dcfce7 !important;
+    color: #15803d !important;
+    border: 1px solid #bbf7d0 !important;
+  }
+  .badge-blue {
+    background: #eff6ff !important;
+    color: #1d4ed8 !important;
+    border: 1px solid #bfdbfe !important;
+  }
+  .badge-orange {
+    background: #fff7ed !important;
+    color: #c2410c !important;
+    border: 1px solid #fed7aa !important;
+  }
+  .detail-allocations-table {
+    margin: 1.25rem 0;
+  }
+  .alloc-breakdown-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+  .alloc-breakdown-table th {
+    background: #f8fafc;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 2px solid #e2e8f0;
+    text-align: left;
+    font-weight: 600;
+    color: #475569;
+  }
+  .alloc-breakdown-table td {
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .empty-alloc-text {
+    color: #94a3b8;
+    text-align: center;
+    padding: 1.5rem 0;
   }
 </style>
 
@@ -251,6 +355,90 @@
           <button type="button" class="btn btn-secondary btn-small" on:click={addAllocation}><Icon name="plus" size={15}/> Ajouter une affectation</button>
           <div class:over-allocated={allocationTotal > invoiceTotal} class="allocation-total"><span>Affecté <strong>{currency.format(allocationTotal)}</strong></span><span>Reste <strong>{currency.format(allocationRemaining)}</strong></span></div>
           <div class="capture-actions"><button type="button" class="btn btn-secondary" on:click={closeAllocations}>Annuler</button><button type="button" class="btn btn-primary" disabled={allocationSaving} on:click={saveAllocations}>{allocationSaving ? 'Enregistrement…' : 'Enregistrer la ventilation'}</button></div>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if detailOpen && detailedInvoice}
+  <div class="capture-layer" role="presentation">
+    <button class="backdrop" aria-label="Fermer les détails" on:click={closeVentilationDetails}></button>
+    <div class="capture-modal allocation-modal" role="dialog" aria-modal="true" aria-labelledby="ventilation-detail-title">
+      <header class="capture-header">
+        <div>
+          <span class="eyebrow">Ventilation analytique</span>
+          <h2 id="ventilation-detail-title">Détail des affectations</h2>
+        </div>
+        <button class="icon-button" aria-label="Fermer" on:click={closeVentilationDetails}>
+          <Icon name="close"/>
+        </button>
+      </header>
+      <div class="capture-content">
+        {#if detailLoading}
+          <div class="state" role="status"><span class="spinner"></span><p>Chargement du détail…</p></div>
+        {:else if detailError}
+          <div class="alert" role="alert"><Icon name="alert" size={18}/>{detailError}</div>
+        {:else}
+          <div class="allocation-summary">
+            <div>
+              <span>Facture</span>
+              <strong>{detailedInvoice.supplier || detailedInvoice.recipient || detailedInvoice.number || 'Facture'}</strong>
+            </div>
+            <div>
+              <span>Total TTC</span>
+              <strong>{currency.format(detailedInvoice.totalTtc ?? detailedInvoice.total ?? 0)}</strong>
+            </div>
+          </div>
+
+          <div class="detail-allocations-table">
+            {#if !detailedAllocations.length}
+              <p class="empty-alloc-text">Aucune affectation enregistrée pour cette facture.</p>
+            {:else}
+              <table class="alloc-breakdown-table">
+                <thead>
+                  <tr>
+                    <th>Projet</th>
+                    <th>Catégorie / Rubrique</th>
+                    <th class="align-right">Montant TTC</th>
+                    <th class="align-right">Part</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each detailedAllocations as alloc}
+                    <tr>
+                      <td><strong>{alloc.project_name || alloc.projectId || 'Aucun projet'}</strong></td>
+                      <td>{alloc.category_name || alloc.categoryId || 'Non classée'}</td>
+                      <td class="align-right amount">{currency.format(alloc.amount)}</td>
+                      <td class="align-right">
+                        {detailedInvoice.totalTtc ? Math.round((alloc.amount / Math.abs(detailedInvoice.totalTtc)) * 100) : 0}%
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            {/if}
+          </div>
+
+          <div class="allocation-total">
+            <span>Affecté : <strong>{currency.format(detailedInvoice.allocatedAmount ?? detailedInvoice.allocated_amount ?? 0)}</strong></span>
+            <span>Reste : <strong>{currency.format(detailedInvoice.remainingAmount ?? detailedInvoice.remaining_amount ?? 0)}</strong></span>
+          </div>
+
+          <div class="capture-actions">
+            <button type="button" class="btn btn-secondary" on:click={closeVentilationDetails}>Fermer</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              on:click={() => {
+                const inv = detailedInvoice;
+                closeVentilationDetails();
+                if (inv) editAllocations(inv);
+              }}
+            >
+              <Icon name="folder" size={16} /> Modifier la ventilation
+            </button>
+          </div>
         {/if}
       </div>
     </div>

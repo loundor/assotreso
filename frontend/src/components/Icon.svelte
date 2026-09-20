@@ -1,5 +1,5 @@
 <script lang="ts">
-  export let name: 'dashboard' | 'wallet' | 'transfer' | 'invoice' | 'tag' | 'folder' | 'settings' | 'scan' | 'menu' | 'close' | 'logout' | 'plus' | 'camera' | 'upload' | 'check' | 'chevron' | 'alert' | 'refresh' = 'dashboard';
+  export let name: 'dashboard' | 'wallet' | 'transfer' | 'invoice' | 'tag' | 'folder' | 'settings' | 'scan' | 'menu' | 'close' | 'logout' | 'plus' | 'camera' | 'upload' | 'check' | 'chevron' | 'alert' | 'refresh' | 'link' | 'trash' = 'dashboard';
   export let size = 20;
 </script>
 
@@ -21,5 +21,7 @@
   {:else if name === 'check'}<path d="m5 12 4 4L19 6"/>
   {:else if name === 'chevron'}<path d="m9 18 6-6-6-6"/>
   {:else if name === 'alert'}<path d="M12 4 3 20h18L12 4Z"/><path d="M12 9v5m0 3h.01"/>
-  {:else if name === 'refresh'}<path d="M20 7v5h-5M4 17v-5h5"/><path d="M18 12a6 6 0 0 0-10-4L4 12m2 0a6 6 0 0 0 10 4l4-4"/>{/if}
+  {:else if name === 'refresh'}<path d="M20 7v5h-5M4 17v-5h5"/><path d="M18 12a6 6 0 0 0-10-4L4 12m2 0a6 6 0 0 0 10 4l4-4"/>
+  {:else if name === 'link'}<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+  {:else if name === 'trash'}<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>{/if}
 </svg>

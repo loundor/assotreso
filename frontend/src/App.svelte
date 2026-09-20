@@ -5,6 +5,7 @@
   import Accounts from './pages/Accounts.svelte';
   import Transactions from './pages/Transactions.svelte';
   import Invoices from './pages/Invoices.svelte';
+  import Reconciliation from './pages/Reconciliation.svelte';
   import Resources from './pages/Resources.svelte';
   import Configuration from './pages/Configuration.svelte';
   import Shell from './components/Shell.svelte';
@@ -17,7 +18,7 @@
   let page: PageId = 'dashboard';
   let captureOpen = false;
   let invoiceRefresh = 0;
-  const validPages: PageId[] = ['dashboard','accounts','transactions','invoices','categories','projects','configuration'];
+  const validPages: PageId[] = ['dashboard','accounts','transactions','invoices','reconciliation','categories','projects','configuration'];
 
   function pageFromHash(): PageId {
     const candidate = location.hash.replace('#/', '') as PageId;
@@ -57,6 +58,7 @@
     {:else if page === 'accounts'}<Accounts />
     {:else if page === 'transactions'}<Transactions />
     {:else if page === 'invoices'}<Invoices openCapture={() => captureOpen = true} refreshKey={invoiceRefresh} />
+    {:else if page === 'reconciliation'}<Reconciliation />
     {:else if page === 'categories'}<Resources kind="categories" />
     {:else if page === 'projects'}<Resources kind="projects" />
     {:else if page === 'configuration' && user.role === 'ADMIN'}<Configuration />{/if}

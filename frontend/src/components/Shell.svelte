@@ -9,12 +9,13 @@
   export let logout: () => void;
 
   let menuOpen = false;
-  type NavItem = { id: PageId; label: string; icon: 'dashboard' | 'wallet' | 'transfer' | 'invoice' | 'tag' | 'folder' | 'settings' };
+  type NavItem = { id: PageId; label: string; icon: 'dashboard' | 'wallet' | 'transfer' | 'invoice' | 'tag' | 'folder' | 'settings' | 'link' };
   const baseItems: NavItem[] = [
     { id: 'dashboard', label: 'Tableau de bord', icon: 'dashboard' },
     { id: 'accounts', label: 'Comptes', icon: 'wallet' },
     { id: 'transactions', label: 'Transactions', icon: 'transfer' },
     { id: 'invoices', label: 'Factures', icon: 'invoice' },
+    { id: 'reconciliation', label: 'Rapprochement', icon: 'link' },
     { id: 'categories', label: 'Catégories', icon: 'tag' },
     { id: 'projects', label: 'Projets', icon: 'folder' }
   ];

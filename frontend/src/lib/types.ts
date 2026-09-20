@@ -1,4 +1,4 @@
-export type PageId = 'dashboard' | 'accounts' | 'transactions' | 'invoices' | 'categories' | 'projects' | 'configuration';
+export type PageId = 'dashboard' | 'accounts' | 'transactions' | 'invoices' | 'reconciliation' | 'categories' | 'projects' | 'configuration';
 export type UserRole = 'ADMIN' | 'TRESORIER' | 'PRESIDENT' | 'BUREAU' | 'BENEVOLE';
 
 export interface User {
@@ -79,8 +79,32 @@ export interface Account {
   name: string;
   type?: string;
   balance?: number;
+  initialBalance?: number;
+  initial_balance?: number;
   currency?: string;
+  bank?: string;
   bankName?: string;
+  bank_name?: string;
+  bankAddress?: string;
+  bank_address?: string;
+  managerName?: string;
+  manager_name?: string;
+  iban?: string;
+  rib?: string;
+  contractFilename?: string;
+  contract_filename?: string;
+  contractPath?: string;
+  contract_path?: string;
+  contractMime?: string;
+  contract_mime?: string;
+  hasContract?: boolean;
+  bankinConnected?: boolean;
+  bankin_connected?: boolean;
+  bankinAccountId?: string;
+  bankin_account_id?: string;
+  lastSyncedAt?: string;
+  last_synced_at?: string;
+  active?: boolean;
 }
 
 export interface Category {
@@ -126,11 +150,21 @@ export interface Transaction {
   amount: number;
   direction?: 'income' | 'expense' | 'credit' | 'debit';
   type?: string;
+  bank_label?: string | null;
+  bankLabel?: string | null;
+  bank_reference?: string | null;
+  bankReference?: string | null;
   payment_method?: string | null;
   paymentMethod?: string | null;
   category?: Category | string;
+  category_name?: string | null;
+  categoryName?: string | null;
   account?: Account | string;
+  account_name?: string | null;
+  accountName?: string | null;
   project?: Project | string;
+  project_name?: string | null;
+  projectName?: string | null;
 }
 
 export interface Invoice {
@@ -199,4 +233,30 @@ export interface CapturedDocument {
   url?: string;
   filename?: string;
   status?: string;
+}
+
+export interface ReconciledPair {
+  invoice_id: string;
+  invoice_number?: string;
+  invoice_date?: string;
+  invoice_supplier?: string;
+  invoice_recipient?: string;
+  invoice_total_ttc?: number;
+  document_id?: string;
+  document_name?: string;
+  document_mime_type?: string;
+  transaction_id: string;
+  transaction_date: string;
+  transaction_amount: number;
+  transaction_description: string;
+  transaction_bank_label?: string;
+  transaction_payment_method?: string;
+  account_name?: string;
+  reconciled_at?: string;
+}
+
+export interface ReconciliationData {
+  unreconciledTransactions: Transaction[];
+  unreconciledInvoices: Invoice[];
+  reconciledPairs: ReconciledPair[];
 }
