@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# Builds and reports
+backend/dist/
+frontend/dist/
+coverage/
+*.log
+
+# Runtime data
+backend/storage/*
+!backend/storage/.gitkeep
+postgres-data/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

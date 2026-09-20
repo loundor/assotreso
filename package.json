@@ -1,0 +1,18 @@
+{
+  "name": "association-tresorerie",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MVP de trésorerie pour association bénévole",
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "dev:api": "npm --prefix backend run dev",
+    "dev:web": "npm --prefix frontend run dev",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "check": "npm --prefix backend test && npm --prefix frontend run check && npm --prefix frontend run build",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
