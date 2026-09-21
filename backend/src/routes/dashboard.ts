@@ -39,9 +39,13 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
         COALESCE(SUM(amount) FILTER (WHERE amount > 0 AND date_trunc('month', operation_date) = date_trunc('month', CURRENT_DATE)), 0)::float8 AS month_income,
         ABS(COALESCE(SUM(amount) FILTER (WHERE amount < 0 AND date_trunc('month', operation_date) = date_trunc('month', CURRENT_DATE)), 0))::float8 AS month_expense,
         COALESCE(SUM(amount) FILTER (WHERE amount > 0 AND operation_date >= $1::date), 0)::float8 AS year_income,
-        ABS(COALESCE(SUM(amount) FILTER (WHERE amount < 0 AND operation_date >= $1::date), 0))::float8 AS year_expense,
-        (SELECT COUNT(*)::int FROM transactions t WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.transaction_id = t.id)) AS transactions_without_document,
-        (SELECT COUNT(*)::int FROM invoices i JOIN documents d ON d.id = i.document_id WHERE i.transaction_id IS NULL AND d.transaction_id IS NULL) AS unmatched_documents
+        (SELECT COUNT(*)::int FROM transactions t
+         LEFT JOIN (SELECT transaction_id, SUM(reconciled_amount) AS rec_sum FROM invoice_reconciliations GROUP BY transaction_id) r ON r.transaction_id = t.id
+         WHERE COALESCE(r.rec_sum, 0) < ABS(COALESCE(t.amount, 0)) - 0.009) AS transactions_without_document,
+        (SELECT COUNT(*)::int FROM invoices i
+         JOIN documents d ON d.id = i.document_id
+         LEFT JOIN (SELECT invoice_id, SUM(reconciled_amount) AS rec_sum FROM invoice_reconciliations GROUP BY invoice_id) r ON r.invoice_id = i.id
+         WHERE COALESCE(r.rec_sum, 0) < ABS(COALESCE(i.total_ttc, 0)) - 0.009) AS unmatched_documents
       FROM transactions
     `, [fiscalStartDate]);
     const latestTransactions = await query(

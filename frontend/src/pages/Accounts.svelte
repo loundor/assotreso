@@ -25,6 +25,25 @@
   let rib = '';
   let balance = 0;
   let bankinConnected = false;
+  let formBankinMode: 'sandbox' | 'production' = 'sandbox';
+  let formBankinClientId = '';
+  let formBankinClientSecret = '';
+
+  // Suppression de compte
+  let deleteModalOpen = false;
+  let accountToDelete: Account | null = null;
+  let deleting = false;
+  let deleteError = '';
+
+  // Plugin Bankin'
+  let bankinModalOpen = false;
+  let bankinTargetAccount: Account | null = null;
+  let bankinPluginMode: 'sandbox' | 'production' = 'sandbox';
+  let bankinClientId = '';
+  let bankinClientSecret = '';
+  let bankinConnecting = false;
+  let bankinPluginError = '';
+  let bankinPluginSuccess = '';
 
   // Gestion du contrat
   let uploadingContractForId: string | number | null = null;
@@ -62,6 +81,9 @@
     rib = '';
     balance = 0;
     bankinConnected = false;
+    formBankinMode = 'sandbox';
+    formBankinClientId = '';
+    formBankinClientSecret = '';
     formError = '';
     formOpen = true;
   }
@@ -77,6 +99,9 @@
     rib = account.rib || '';
     balance = Number(account.initialBalance ?? account.initial_balance ?? 0);
     bankinConnected = Boolean(account.bankinConnected ?? account.bankin_connected);
+    formBankinMode = 'sandbox';
+    formBankinClientId = '';
+    formBankinClientSecret = '';
     formError = '';
     formOpen = true;
   }
@@ -104,10 +129,26 @@
         currency: 'EUR'
       };
 
+      let savedAccount: Account;
       if (editingAccount) {
-        await api.put(`accounts/${editingAccount.id}`, payload);
+        const res = await api.put<{ account: Account }>(`accounts/${editingAccount.id}`, payload);
+        savedAccount = res.account || editingAccount;
       } else {
-        await api.post('accounts', payload);
+        const res = await api.post<{ account: Account }>('accounts', payload);
+        savedAccount = res.account;
+      }
+
+      if (savedAccount?.id && bankinConnected) {
+        try {
+          await api.post(`accounts/${savedAccount.id}/bankin/connect`, {
+            connected: true,
+            environment: formBankinMode,
+            clientId: formBankinClientId.trim() || undefined,
+            clientSecret: formBankinClientSecret.trim() || undefined
+          });
+        } catch (bErr) {
+          console.warn('Bankin connection error:', bErr);
+        }
       }
 
       closeForm();
@@ -116,6 +157,121 @@
       formError = getErrorMessage(e);
     } finally {
       saving = false;
+    }
+  }
+
+  async function toggleActive(account: Account) {
+    try {
+      await api.post(`accounts/${account.id}/toggle-active`, {});
+      syncResultNotice = `Statut du compte « ${account.name} » mis à jour.`;
+      await load();
+      setTimeout(() => { syncResultNotice = ''; }, 4000);
+    } catch (e) {
+      syncResultError = getErrorMessage(e);
+      setTimeout(() => { syncResultError = ''; }, 5000);
+    }
+  }
+
+  function promptDelete(account: Account) {
+    accountToDelete = account;
+    deleteError = '';
+    deleteModalOpen = true;
+  }
+
+  function closeDeleteModal() {
+    if (!deleting) {
+      deleteModalOpen = false;
+      accountToDelete = null;
+      deleteError = '';
+    }
+  }
+
+  async function confirmDelete() {
+    if (!accountToDelete) return;
+    deleting = true;
+    deleteError = '';
+    try {
+      await api.delete(`accounts/${accountToDelete.id}`);
+      deleteModalOpen = false;
+      accountToDelete = null;
+      syncResultNotice = 'Compte supprimé avec succès.';
+      await load();
+      setTimeout(() => { syncResultNotice = ''; }, 4000);
+    } catch (e) {
+      deleteError = getErrorMessage(e);
+    } finally {
+      deleting = false;
+    }
+  }
+
+  function openBankinPluginModal(account: Account) {
+    bankinTargetAccount = account;
+    bankinPluginMode = 'sandbox';
+    bankinClientId = '';
+    bankinClientSecret = '';
+    bankinPluginError = '';
+    bankinPluginSuccess = '';
+    bankinModalOpen = true;
+  }
+
+  function closeBankinPluginModal() {
+    if (!bankinConnecting) {
+      bankinModalOpen = false;
+      bankinTargetAccount = null;
+      bankinPluginError = '';
+      bankinPluginSuccess = '';
+    }
+  }
+
+  async function connectBankinPlugin() {
+    if (!bankinTargetAccount) return;
+    bankinConnecting = true;
+    bankinPluginError = '';
+    bankinPluginSuccess = '';
+    try {
+      const res = await api.post<{ connected: boolean; message: string }>(`accounts/${bankinTargetAccount.id}/bankin/connect`, {
+        connected: true,
+        environment: bankinPluginMode,
+        clientId: bankinClientId.trim() || undefined,
+        clientSecret: bankinClientSecret.trim() || undefined
+      });
+      bankinPluginSuccess = res.message || 'Connecteur Bankin\' configuré avec succès !';
+      await load();
+      setTimeout(() => {
+        closeBankinPluginModal();
+      }, 1500);
+    } catch (e) {
+      bankinPluginError = getErrorMessage(e);
+    } finally {
+      bankinConnecting = false;
+    }
+  }
+
+  async function disconnectBankin(account: Account) {
+    if (!confirm(`Désactiver le connecteur Bankin' pour « ${account.name} » ?`)) return;
+    try {
+      await api.post(`accounts/${account.id}/bankin/connect`, { connected: false });
+      syncResultNotice = `Connecteur Bankin' désactivé pour « ${account.name} ».`;
+      await load();
+      setTimeout(() => { syncResultNotice = ''; }, 4000);
+    } catch (e) {
+      syncResultError = getErrorMessage(e);
+    }
+  }
+
+  async function startBankinOAuth() {
+    if (!bankinTargetAccount) return;
+    bankinPluginError = '';
+    try {
+      const res = await api.post<{ authUrl: string }>(`accounts/${bankinTargetAccount.id}/bankin/oauth-url`, {
+        clientId: bankinClientId.trim() || undefined,
+        redirectUri: window.location.href
+      });
+      if (res.authUrl) {
+        window.open(res.authUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (e) {
+      bankinPluginError = getErrorMessage(e);
     }
   }
 
@@ -309,6 +465,34 @@
             <span>Activer le connecteur bancaire Bankin' pour ce compte</span>
           </label>
         </div>
+
+        {#if bankinConnected}
+          <div class="bankin-plugin-subform">
+            <div class="bankin-plugin-subform-header">
+              <span class="badge-mini badge-blue">Plugin Bankin' Bridge</span>
+              <p>Choisissez le mode d'intégration bancaire pour synchroniser les relevés.</p>
+            </div>
+            <div class="form-grid compact-grid">
+              <label>
+                Mode Bankin'
+                <select bind:value={formBankinMode}>
+                  <option value="sandbox">Sandbox (Développement & test avec banques virtuelles)</option>
+                  <option value="production">Production (Connexion bancaire réelle Open Banking)</option>
+                </select>
+              </label>
+              <label>
+                Client ID Bankin'
+                <input bind:value={formBankinClientId} placeholder={formBankinMode === 'sandbox' ? 'Optionnel en sandbox' : 'client_id_bankin_...'} />
+              </label>
+              {#if formBankinMode === 'production'}
+                <label>
+                  Client Secret Bankin'
+                  <input type="password" bind:value={formBankinClientSecret} placeholder="secret_..." />
+                </label>
+              {/if}
+            </div>
+          </div>
+        {/if}
       </div>
 
       <div class="form-actions">
@@ -325,14 +509,21 @@
   <AsyncState {loading} {error} empty={!accounts.length} emptyTitle="Aucun compte" emptyText="Ajoutez le premier compte bancaire ou la caisse de l’association." onRetry={load}>
     <div class="accounts-list-grid">
       {#each accounts as account (account.id)}
-        <article class="account-card-rich panel">
+        <article class="account-card-rich panel" class:account-inactive={account.active === false}>
           <header class="account-card-header">
             <div class="account-title-area">
               <span class="account-type-icon">
                 <Icon name={account.type === 'cash' ? 'wallet' : 'wallet'} size={22} />
               </span>
               <div>
-                <span class="account-bank-tag">{account.type === 'cash' ? 'Caisse d’espèces' : account.bankName || account.bank || 'Établissement bancaire'}</span>
+                <div class="account-tag-row">
+                  <span class="account-bank-tag">{account.type === 'cash' ? 'Caisse d’espèces' : account.bankName || account.bank || 'Établissement bancaire'}</span>
+                  {#if account.active === false}
+                    <span class="badge-mini badge-warning">Inactif</span>
+                  {:else}
+                    <span class="badge-mini badge-green">Actif</span>
+                  {/if}
+                </div>
                 <h3>{account.name}</h3>
               </div>
             </div>
@@ -341,9 +532,25 @@
               <span class="account-balance-badge" class:negative={Number(account.balance ?? 0) < 0}>
                 {currency.format(account.balance ?? 0)}
               </span>
-              <button class="btn btn-secondary btn-small" on:click={() => openEditForm(account)} title="Modifier ce compte">
-                Modifier
-              </button>
+              <div class="account-card-actions">
+                <button class="btn btn-secondary btn-small" on:click={() => openEditForm(account)} title="Modifier les coordonnées de ce compte">
+                  Modifier
+                </button>
+                <button
+                  class="btn btn-secondary btn-small"
+                  on:click={() => toggleActive(account)}
+                  title={account.active === false ? 'Réactiver ce compte' : 'Désactiver temporairement ce compte'}
+                >
+                  {account.active === false ? 'Réactiver' : 'Désactiver'}
+                </button>
+                <button
+                  class="btn btn-secondary btn-small icon-only danger-text"
+                  on:click={() => promptDelete(account)}
+                  title="Supprimer ce compte"
+                >
+                  <Icon name="trash" size={15} />
+                </button>
+              </div>
             </div>
           </header>
 
@@ -431,16 +638,40 @@
                 </small>
               {/if}
 
-              <div class="bankin-actions">
-                <button
-                  class="btn btn-secondary btn-small bankin-sync-btn"
-                  disabled={syncingAccountId === account.id}
-                  on:click={() => syncBankin(account)}
-                  title="Récupérer le relevé bancaire et incorporer les transactions sans doublon"
-                >
-                  <Icon name="refresh" size={15} />
-                  {syncingAccountId === account.id ? 'Synchronisation…' : 'Synchroniser le relevé'}
-                </button>
+              <div class="bankin-actions-row">
+                {#if account.bankinConnected || account.bankin_connected}
+                  <button
+                    class="btn btn-primary btn-small"
+                    disabled={syncingAccountId === account.id}
+                    on:click={() => syncBankin(account)}
+                    title="Récupérer le relevé bancaire et incorporer les transactions sans doublon"
+                  >
+                    <Icon name="refresh" size={15} />
+                    {syncingAccountId === account.id ? 'Synchronisation…' : 'Synchroniser le relevé'}
+                  </button>
+                  <button
+                    class="btn btn-secondary btn-small"
+                    on:click={() => openBankinPluginModal(account)}
+                    title="Configurer les accès API Bankin' ou tester la connexion"
+                  >
+                    Paramètres Bankin'
+                  </button>
+                  <button
+                    class="btn btn-secondary btn-small danger-text"
+                    on:click={() => disconnectBankin(account)}
+                    title="Déconnecter Bankin' de ce compte"
+                  >
+                    Déconnecter
+                  </button>
+                {:else}
+                  <button
+                    class="btn btn-secondary btn-small"
+                    on:click={() => openBankinPluginModal(account)}
+                    title="Activer et configurer l'accès Bankin' / Open Banking"
+                  >
+                    <Icon name="link" size={15} /> Configurer & connecter Bankin'
+                  </button>
+                {/if}
               </div>
             </div>
           </div>
@@ -449,6 +680,124 @@
     </div>
   </AsyncState>
 </div>
+
+<!-- Modal de configuration du Plugin Bankin' -->
+{#if bankinModalOpen && bankinTargetAccount}
+  <div class="capture-layer" role="presentation">
+    <button class="backdrop" aria-label="Fermer" on:click={closeBankinPluginModal}></button>
+    <div class="capture-modal bankin-plugin-modal" role="dialog" aria-modal="true" aria-labelledby="bankin-modal-title">
+      <header class="capture-header">
+        <div>
+          <span class="eyebrow">Connecteur Open Banking</span>
+          <h2 id="bankin-modal-title">Plugin Bankin' Bridge — {bankinTargetAccount.name}</h2>
+        </div>
+        <button class="icon-button" aria-label="Fermer" on:click={closeBankinPluginModal}>
+          <Icon name="close" />
+        </button>
+      </header>
+
+      <div class="bankin-modal-body">
+        <p class="bankin-intro">
+          Le plugin Bankin' Bridge permet de synchroniser automatiquement les relevés bancaires avec Tréso et de dédoublonner rigoureusement chaque opération.
+        </p>
+
+        {#if bankinPluginSuccess}
+          <div class="alert alert-success" role="status">
+            <Icon name="check" size={18} />
+            <span>{bankinPluginSuccess}</span>
+          </div>
+        {/if}
+
+        {#if bankinPluginError}
+          <div class="alert" role="alert">
+            <Icon name="alert" size={18} />
+            <span>{bankinPluginError}</span>
+          </div>
+        {/if}
+
+        <div class="form-grid">
+          <label>
+            Environnement Bankin'
+            <select bind:value={bankinPluginMode}>
+              <option value="sandbox">Sandbox (Environnement de test & banques de simulation)</option>
+              <option value="production">Production (Accès direct API Open Banking Bankin')</option>
+            </select>
+          </label>
+
+          <label>
+            Client ID {bankinPluginMode === 'production' ? '*' : '(optionnel en sandbox)'}
+            <input bind:value={bankinClientId} placeholder="client_id_bankin_..." />
+          </label>
+
+          {#if bankinPluginMode === 'production'}
+            <label>
+              Client Secret *
+              <input type="password" bind:value={bankinClientSecret} placeholder="client_secret_..." />
+            </label>
+          {/if}
+        </div>
+
+        <div class="oauth-section">
+          <div class="oauth-info">
+            <strong>Authentification OAuth Bankin'</strong>
+            <p>Si votre compte Bankin' Bridge utilise la redirection bancaire OAuth, vous pouvez initialiser la mire de connexion sécurisée.</p>
+          </div>
+          <button type="button" class="btn btn-secondary btn-small" on:click={startBankinOAuth}>
+            <Icon name="link" size={15} /> Lancer le flux OAuth Bankin'
+          </button>
+        </div>
+      </div>
+
+      <footer class="capture-footer">
+        <button type="button" class="btn btn-secondary" on:click={closeBankinPluginModal} disabled={bankinConnecting}>
+          Fermer
+        </button>
+        <button type="button" class="btn btn-primary" on:click={connectBankinPlugin} disabled={bankinConnecting}>
+          {bankinConnecting ? 'Vérification…' : 'Tester et enregistrer la connexion'}
+        </button>
+      </footer>
+    </div>
+  </div>
+{/if}
+
+<!-- Modal de confirmation de suppression de compte -->
+{#if deleteModalOpen && accountToDelete}
+  <div class="capture-layer" role="presentation">
+    <button class="backdrop" aria-label="Fermer" on:click={closeDeleteModal}></button>
+    <div class="capture-modal modal-small" role="dialog" aria-modal="true" aria-labelledby="del-acc-title">
+      <header class="capture-header">
+        <div>
+          <span class="eyebrow">Zone de danger</span>
+          <h2 id="del-acc-title">Supprimer le compte</h2>
+        </div>
+        <button class="icon-button" aria-label="Fermer" on:click={closeDeleteModal}>
+          <Icon name="close" />
+        </button>
+      </header>
+
+      <div class="delete-modal-body">
+        <p>Êtes-vous certain de vouloir supprimer définitivement le compte <strong>« {accountToDelete.name} »</strong> ?</p>
+        <p class="subtle-note">Cette action est irréversible. Si des opérations y sont associées, la suppression sera bloquée pour préserver la comptabilité.</p>
+
+        {#if deleteError}
+          <div class="alert" role="alert">
+            <Icon name="alert" size={18} />
+            <span>{deleteError}</span>
+          </div>
+        {/if}
+      </div>
+
+      <footer class="capture-footer">
+        <button type="button" class="btn btn-secondary" on:click={closeDeleteModal} disabled={deleting}>
+          Annuler
+        </button>
+        <button type="button" class="btn btn-primary danger-btn" on:click={confirmDelete} disabled={deleting}>
+          {deleting ? 'Suppression…' : 'Confirmer la suppression'}
+        </button>
+      </footer>
+    </div>
+  </div>
+{/if}
 
 <!-- Modal de prévisualisation du contrat -->
 {#if previewContractOpen}
@@ -484,19 +833,142 @@
   .checkbox-field-wrap {
     grid-column: 1 / -1;
     margin-top: 0.5rem;
-  }
-  .checkbox-label {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+  }
+  .checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
     font-weight: 500;
     cursor: pointer;
+    width: fit-content;
+    max-width: max-content;
+    user-select: none;
+    border: none;
+    background: transparent;
+    padding: 0;
+  }
+  .checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .bankin-plugin-subform {
+    grid-column: 1 / -1;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-top: 0.5rem;
+  }
+  .bankin-plugin-subform-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .bankin-plugin-subform-header p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #64748b;
+  }
+  .compact-grid {
+    gap: 0.75rem;
   }
 
   .accounts-list-grid {
     display: grid;
     grid-template-columns: 1fr;
     gap: 1.5rem;
+  }
+
+  .account-card-rich.account-inactive {
+    opacity: 0.75;
+    background: #f8fafc;
+    border-style: dashed;
+  }
+
+  .account-tag-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .account-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .bankin-actions-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: auto;
+  }
+
+  .bankin-plugin-modal {
+    max-width: 640px;
+    width: 100%;
+  }
+  .bankin-modal-body {
+    padding: 1.25rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .bankin-intro {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #475569;
+  }
+  .oauth-section {
+    background: #f1f5f9;
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 0.5rem;
+  }
+  .oauth-info strong {
+    display: block;
+    font-size: 0.9rem;
+    color: #1e293b;
+  }
+  .oauth-info p {
+    margin: 0.2rem 0 0;
+    font-size: 0.8rem;
+    color: #64748b;
+  }
+  .modal-small {
+    max-width: 480px;
+    width: 100%;
+  }
+  .delete-modal-body {
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .subtle-note {
+    font-size: 0.85rem;
+    color: #64748b;
+    margin: 0;
+  }
+  .danger-btn {
+    background: #dc2626 !important;
+    border-color: #dc2626 !important;
+    color: #ffffff !important;
+  }
+  .badge-mini.badge-warning {
+    background: #fef3c7;
+    color: #b45309;
   }
 
   .account-card-rich {
@@ -643,13 +1115,6 @@
   .sync-date {
     font-size: 0.75rem;
     color: #64748b;
-  }
-  .bankin-actions {
-    margin-top: auto;
-  }
-  .bankin-sync-btn {
-    width: 100%;
-    justify-content: center;
   }
 
   /* Badges */

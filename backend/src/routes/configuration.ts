@@ -1,7 +1,10 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createReadStream, existsSync } from 'node:fs';
 import bcrypt from 'bcryptjs';
 import type { FastifyPluginAsync } from 'fastify';
+import type { MultipartFile } from '@fastify/multipart';
 import pg from 'pg';
+import { audit } from '../audit.js';
 import { config } from '../config.js';
 import { pool, query } from '../db.js';
 import { ApiError, booleanValue, objectBody, optionalString, requiredString } from '../errors.js';
@@ -10,6 +13,8 @@ import { codexDeviceLoginStatus, codexIsAuthenticated, startCodexDeviceLogin } f
 import { agyIsAuthenticated, agyIsAvailable, testAgyConnection } from '../services/agy.js';
 import { startAgyTerminalSession, getTerminalSession } from '../services/terminal.js';
 import { decryptSecret, encryptSecret } from '../services/secrets.js';
+import { removeStoredFile, storeMultipartFile, storedFilePath } from '../services/files.js';
+import { listPrompts, updatePromptContent } from '../services/prompts.js';
 
 const { Pool } = pg;
 const ROLES = ['ADMIN', 'TRESORIER', 'PRESIDENT', 'BUREAU', 'BENEVOLE'] as const;
@@ -74,6 +79,8 @@ interface AssociationRow {
   rna: string | null;
   fiscal_start_day: number;
   fiscal_start_month: number;
+  logo_path: string | null;
+  logo_mime: string | null;
 }
 
 interface MemberRow {
@@ -122,7 +129,9 @@ function associationJson(row: AssociationRow) {
     fiscalStartDay: row.fiscal_start_day,
     fiscalStartMonth: row.fiscal_start_month,
     fiscalYearStartDay: row.fiscal_start_day,
-    fiscalYearStartMonth: row.fiscal_start_month
+    fiscalYearStartMonth: row.fiscal_start_month,
+    hasLogo: Boolean(row.logo_path),
+    logoUrl: row.logo_path ? '/api/config/logo' : null
   };
 }
 
@@ -281,6 +290,69 @@ export const configurationRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
+  app.get('/public', { preHandler: app.authenticate }, async () => {
+    const row = await association();
+    return {
+      name: row.name,
+      acronym: row.acronym,
+      legalName: row.legal_name,
+      hasLogo: Boolean(row.logo_path),
+      logoUrl: row.logo_path ? '/api/config/logo' : null,
+      fiscalYearStartDay: row.fiscal_start_day,
+      fiscalYearStartMonth: row.fiscal_start_month
+    };
+  });
+
+  app.get('/logo', async (request, reply) => {
+    const rows = await query<AssociationRow>('SELECT logo_path, logo_mime FROM association_settings WHERE id=1');
+    const setting = rows[0];
+    if (!setting || !setting.logo_path) {
+      throw new ApiError(404, 'Aucun logo configuré.', 'LOGO_INTROUVABLE');
+    }
+    const fullPath = storedFilePath(setting.logo_path);
+    if (!existsSync(fullPath)) {
+      throw new ApiError(404, 'Fichier logo introuvable.', 'LOGO_INTROUVABLE');
+    }
+    reply.type(setting.logo_mime || 'image/png');
+    reply.header('Cache-Control', 'no-cache, max-age=0, must-revalidate');
+    return reply.send(createReadStream(fullPath));
+  });
+
+  app.post('/logo', adminOnly, async (request, reply) => {
+    let upload: Awaited<ReturnType<typeof storeMultipartFile>> | null = null;
+    for await (const part of request.parts()) {
+      if (part.type === 'file' && (part.fieldname === 'file' || part.fieldname === 'logo')) {
+        upload = await storeMultipartFile(part as MultipartFile);
+      }
+    }
+    if (!upload) throw new ApiError(400, 'Le fichier image du logo est requis.', 'VALIDATION');
+    const prev = await query<AssociationRow>('SELECT logo_path FROM association_settings WHERE id=1');
+    if (prev[0]?.logo_path) {
+      await removeStoredFile(storedFilePath(prev[0].logo_path)).catch(() => undefined);
+    }
+    const rows = await query<AssociationRow>(
+      'UPDATE association_settings SET logo_path=$1, logo_mime=$2, updated_at=now() WHERE id=1 RETURNING *',
+      [upload.storedName, upload.mimeType]
+    );
+    await audit(pool, request.user.sub, 'UPDATE', 'association_logo', '1', { filename: upload.originalName });
+    return reply.send({
+      association: associationJson(rows[0]!),
+      logoUrl: '/api/config/logo'
+    });
+  });
+
+  app.delete('/logo', adminOnly, async (request) => {
+    const prev = await query<AssociationRow>('SELECT logo_path FROM association_settings WHERE id=1');
+    if (prev[0]?.logo_path) {
+      await removeStoredFile(storedFilePath(prev[0].logo_path)).catch(() => undefined);
+    }
+    const rows = await query<AssociationRow>(
+      'UPDATE association_settings SET logo_path=NULL, logo_mime=NULL, updated_at=now() WHERE id=1 RETURNING *'
+    );
+    await audit(pool, request.user.sub, 'DELETE', 'association_logo', '1');
+    return { association: associationJson(rows[0]!) };
+  });
+
   app.put('/association', adminOnly, async (request) => {
     const body = objectBody(request.body);
     const rows = await query<AssociationRow>(
@@ -293,8 +365,8 @@ export const configurationRoutes: FastifyPluginAsync = async (app) => {
         optionalString(body.address ?? body.adresse), optionalString(body.addressLine2), optionalString(body.postalCode ?? body.cp),
         optionalString(body.city ?? body.ville), optionalString(body.country) ?? 'France', validEmail(body.email),
         optionalString(body.phone ?? body.telephone), optionalString(body.siret), optionalString(body.rna),
-        integerInRange(body.fiscalStartDay ?? body.fiscalYearStartDay ?? body.fiscal_start_day, 'jour de début d’exercice', 1, 31),
-        integerInRange(body.fiscalStartMonth ?? body.fiscalYearStartMonth ?? body.fiscal_start_month, 'mois de début d’exercice', 1, 12)
+        integerInRange(body.fiscalYearStartDay ?? body.fiscalStartDay ?? body.fiscal_start_day, 'jour de début d’exercice', 1, 31),
+        integerInRange(body.fiscalYearStartMonth ?? body.fiscalStartMonth ?? body.fiscal_start_month, 'mois de début d’exercice', 1, 12)
       ]
     );
     return { association: associationJson(rows[0]!) };
@@ -617,6 +689,20 @@ export const configurationRoutes: FastifyPluginAsync = async (app) => {
     } catch (error) {
       return { connected: false, message: error instanceof Error ? error.message : 'Connexion au service IA impossible.' };
     }
+  });
+
+  // Gestion des contextes et prompts Markdown des IA
+  app.get('/ai/prompts', adminOnly, async () => {
+    const prompts = await listPrompts();
+    return { prompts };
+  });
+
+  app.put<{ Params: { id: string } }>('/ai/prompts/:id', adminOnly, async (request) => {
+    const body = objectBody(request.body);
+    const content = requiredString(body.content, 'contenu des instructions');
+    const updated = await updatePromptContent(request.params.id, content);
+    await audit(pool, request.user.sub, 'UPDATE', 'ai_prompt', request.params.id, { title: updated.title });
+    return { prompt: updated };
   });
 
   app.post('/ai/terminal/start', adminOnly, async (request) => {

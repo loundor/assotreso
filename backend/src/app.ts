@@ -13,6 +13,7 @@ import { documentRoutes } from './routes/documents.js';
 import { projectRoutes } from './routes/projects.js';
 import { transactionRoutes } from './routes/transactions.js';
 import { reconciliationRoutes } from './routes/reconciliation.js';
+import { reportsRoutes } from './routes/reports.js';
 import { checkDatabase } from './migrate.js';
 
 interface PgError extends Error {
@@ -94,6 +95,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await api.register(projectRoutes);
     await api.register(transactionRoutes);
     await api.register(reconciliationRoutes);
+    await api.register(reportsRoutes);
     await api.register(documentRoutes);
     await api.register(configurationRoutes, { prefix: '/config' });
   }, { prefix: '/api' });

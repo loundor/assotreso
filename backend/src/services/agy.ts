@@ -88,25 +88,10 @@ export async function agyIsAvailable(): Promise<boolean> {
   });
 }
 
+import { resolvePromptPath } from './prompts.js';
+
 export async function resolvePromptMarkdownPath(): Promise<string> {
-  const candidates = [
-    join(config.promptsDir, 'analyse_justificatif.md'),
-    resolve(process.cwd(), 'prompts/analyse_justificatif.md'),
-    resolve(process.cwd(), 'backend/prompts/analyse_justificatif.md'),
-    resolve(dirname(fileURLToPath(import.meta.url)), '../../prompts/analyse_justificatif.md')
-  ];
-
-  for (const candidate of candidates) {
-    try {
-      await access(candidate, constants.R_OK);
-      return candidate;
-    } catch {
-      // Continue search
-    }
-  }
-
-  // Si non trouvé, utilise le premier candidat
-  return candidates[0]!;
+  return resolvePromptPath('analyse_justificatif.md');
 }
 
 function parseAgyJsonOutput(stdout: string): unknown {
@@ -375,6 +360,79 @@ export async function agyIsAuthenticated(): Promise<boolean> {
     }
   }
   return false;
+}
+
+export async function executeAgyTextPrompt(prompt: string, model?: string): Promise<string> {
+  const binary = await findAgyExecutable();
+  const workDir = await mkdtemp(join(tmpdir(), 'treso-agy-report-'));
+
+  const args: string[] = [
+    '--print', prompt,
+    '--output-format', 'text',
+    '--dangerously-skip-permissions'
+  ];
+  if (model && model.trim()) {
+    args.push('--model', model.trim());
+  }
+
+  try {
+    return await new Promise<string>((resolvePromise, rejectPromise) => {
+      const child = spawn(binary, args, {
+        cwd: workDir,
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let finished = false;
+
+      const checkAuth = (data: string) => {
+        if (!finished && isAgyAuthPrompt(data)) {
+          finished = true;
+          clearTimeout(timeout);
+          child.kill('SIGTERM');
+          rejectPromise(new Error("Le CLI agy n'est pas authentifié. Veuillez vous connecter dans Configuration > Terminal."));
+        }
+      };
+
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString('utf8');
+        checkAuth(stdout);
+      });
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString('utf8');
+        checkAuth(stderr);
+      });
+
+      const timeout = setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        child.kill('SIGTERM');
+        rejectPromise(new Error("Le délai maximal d'exécution de agy (120 secondes) a été dépassé."));
+      }, 120_000);
+
+      child.once('error', (err) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+        rejectPromise(new Error(`Impossible d'exécuter agy (${binary}) : ${err.message}`));
+      });
+
+      child.once('close', (code) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+        if (code === 0 && stdout.trim()) {
+          resolvePromise(stdout.trim());
+        } else {
+          rejectPromise(new Error(stderr.trim() || stdout.trim() || `agy a quitté avec le code ${code}`));
+        }
+      });
+    });
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 

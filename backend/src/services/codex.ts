@@ -310,3 +310,40 @@ export async function analyzeInvoiceWithCodex(ocrText: string, model: string): P
     await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
+
+export async function executeCodexTextPrompt(prompt: string, model: string): Promise<string> {
+  const workDir = await mkdtemp(join(tmpdir(), 'treso-codex-report-'));
+  const outputPath = join(workDir, 'result.txt');
+
+  try {
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+      const child = spawn(CODEX_EXECUTABLE, [
+        'exec', '--ephemeral', '--ignore-user-config', '--skip-git-repo-check',
+        '--sandbox', 'read-only',
+        '--output-last-message', outputPath, '--model', model, '-'
+      ], {
+        cwd: workDir,
+        env: codexEnvironment(),
+        stdio: ['pipe', 'ignore', 'pipe']
+      });
+      let errorOutput = '';
+      child.stderr.on('data', (chunk: Buffer) => {
+        errorOutput = `${errorOutput}${chunk.toString('utf8')}`.slice(-4_000);
+      });
+      const timeout = setTimeout(() => child.kill('SIGTERM'), 120_000);
+      child.once('error', (error) => {
+        clearTimeout(timeout);
+        rejectPromise(error);
+      });
+      child.once('close', (code) => {
+        clearTimeout(timeout);
+        if (code === 0) resolvePromise();
+        else rejectPromise(new Error(errorOutput.trim() || `Codex a quitté avec le code ${code}.`));
+      });
+      child.stdin.end(prompt);
+    });
+    return (await readFile(outputPath, 'utf8')).trim();
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}

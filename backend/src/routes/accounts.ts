@@ -6,7 +6,7 @@ import { audit } from '../audit.js';
 import { pool, query, withTransaction } from '../db.js';
 import { ApiError, booleanValue, numeric, objectBody, optionalNumeric, optionalString, requiredString } from '../errors.js';
 import { removeStoredFile, storedFilePath, storeMultipartFile } from '../services/files.js';
-import { generateRealisticBankFeed, type BankinOperation } from '../services/bankin.js';
+import { generateRealisticBankFeed, testBankinConnection, generateBankinAuthUrl, type BankinOperation } from '../services/bankin.js';
 
 interface AccountRow {
   id: string;
@@ -142,13 +142,27 @@ export const accountRoutes: FastifyPluginAsync = async (app) => {
     return { account: rows[0] };
   });
 
+  app.post<{ Params: { id: string } }>('/accounts/:id/toggle-active', { preHandler: app.authenticate }, async (request) => {
+    const rows = await query<AccountRow>(
+      'UPDATE accounts SET active = NOT active, updated_at = now() WHERE id = $1 RETURNING *',
+      [request.params.id]
+    );
+    if (!rows[0]) throw new ApiError(404, 'Compte introuvable.', 'COMPTE_INTROUVABLE');
+    await audit(pool, request.user.sub, 'UPDATE', 'account', request.params.id, { action: 'TOGGLE_ACTIVE', active: rows[0].active });
+    return { account: rows[0] };
+  });
+
   app.delete<{ Params: { id: string } }>('/accounts/:id', { preHandler: app.authenticate }, async (request, reply) => {
+    const countRes = await query<{ count: number }>('SELECT COUNT(*)::int AS count FROM transactions WHERE account_id=$1', [request.params.id]);
+    if (countRes[0] && countRes[0].count > 0) {
+      throw new ApiError(409, `Ce compte contient ${countRes[0].count} transaction(s) et ne peut pas être supprimé. Vous pouvez le désactiver pour masquer ses futures opérations.`, 'COMPTE_AVEC_TRANSACTIONS');
+    }
     const account = await query<AccountRow>('SELECT contract_path FROM accounts WHERE id=$1', [request.params.id]);
     if (account[0]?.contract_path) {
       await removeStoredFile(storedFilePath(account[0].contract_path));
     }
     const rows = await query('DELETE FROM accounts WHERE id=$1 RETURNING id', [request.params.id]);
-    if (!rows[0]) throw new ApiError(404, 'Compte introuvable ou utilisé par des opérations.', 'COMPTE_INTROUVABLE');
+    if (!rows[0]) throw new ApiError(404, 'Compte introuvable.', 'COMPTE_INTROUVABLE');
     await audit(pool, request.user.sub, 'DELETE', 'account', request.params.id);
     return reply.code(204).send();
   });
@@ -208,14 +222,42 @@ export const accountRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Params: { id: string } }>('/accounts/:id/bankin/connect', { preHandler: app.authenticate }, async (request) => {
     const body = objectBody(request.body);
     const connected = booleanValue(body.connected, true);
-    const bankinAccountId = optionalString(body.bankinAccountId) ?? `bankin_${request.params.id.slice(0, 8)}`;
-    const rows = await query(
-      `UPDATE accounts SET bankin_connected=$2, bankin_account_id=$3, updated_at=now() WHERE id=$1 RETURNING *`,
-      [request.params.id, connected, connected ? bankinAccountId : null]
-    );
-    if (!rows[0]) throw new ApiError(404, 'Compte introuvable.', 'COMPTE_INTROUVABLE');
-    await audit(pool, request.user.sub, 'UPDATE', 'account', request.params.id, { action: connected ? 'CONNECT_BANKIN' : 'DISCONNECT_BANKIN' });
-    return { account: rows[0], connected };
+    const clientId = optionalString(body.clientId);
+    const clientSecret = optionalString(body.clientSecret);
+    const environment = (optionalString(body.environment) === 'production') ? 'production' : 'sandbox';
+    const fallbackBankinId = optionalString(body.bankinAccountId) ?? `bkn_${request.params.id.slice(0, 8)}`;
+
+    if (connected) {
+      const test = testBankinConnection({ clientId, clientSecret, environment });
+      if (!test.success) {
+        throw new ApiError(400, test.message, 'BANKIN_AUTH_ERROR');
+      }
+      const bankinAccountId = test.accountId || fallbackBankinId;
+      const rows = await query(
+        `UPDATE accounts SET bankin_connected=true, bankin_account_id=$2, updated_at=now() WHERE id=$1 RETURNING *`,
+        [request.params.id, bankinAccountId]
+      );
+      if (!rows[0]) throw new ApiError(404, 'Compte introuvable.', 'COMPTE_INTROUVABLE');
+      await audit(pool, request.user.sub, 'UPDATE', 'account', request.params.id, { action: 'CONNECT_BANKIN', environment });
+      return { account: rows[0], connected: true, message: test.message };
+    } else {
+      const rows = await query(
+        `UPDATE accounts SET bankin_connected=false, bankin_account_id=NULL, updated_at=now() WHERE id=$1 RETURNING *`,
+        [request.params.id]
+      );
+      if (!rows[0]) throw new ApiError(404, 'Compte introuvable.', 'COMPTE_INTROUVABLE');
+      await audit(pool, request.user.sub, 'UPDATE', 'account', request.params.id, { action: 'DISCONNECT_BANKIN' });
+      return { account: rows[0], connected: false };
+    }
+  });
+
+  app.post<{ Params: { id: string } }>('/accounts/:id/bankin/oauth-url', { preHandler: app.authenticate }, async (request) => {
+    const body = objectBody(request.body);
+    const clientId = optionalString(body.clientId) || 'demo_client_id';
+    const redirectUri = optionalString(body.redirectUri) || 'http://localhost:8080/#/accounts';
+    const state = `st_${request.params.id.slice(0, 8)}_${Date.now()}`;
+    const authUrl = generateBankinAuthUrl(clientId, redirectUri, state);
+    return { authUrl, state };
   });
 
   app.post<{ Params: { id: string } }>('/accounts/:id/bankin/sync', { preHandler: app.authenticate }, async (request) => {

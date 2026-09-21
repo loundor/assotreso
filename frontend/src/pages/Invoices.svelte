@@ -2,14 +2,17 @@
   import { onDestroy, onMount } from 'svelte';
   import AsyncState from '../components/AsyncState.svelte';
   import Icon from '../components/Icon.svelte';
+  import FiscalYearNav from '../components/FiscalYearNav.svelte';
   import { api, listFrom } from '../lib/api';
   import { currency, formatDate, getErrorMessage } from '../lib/utils';
   import type { Category, Invoice, InvoiceAllocation, Project } from '../lib/types';
 
   export let openCapture: () => void;
+  export let openManualCapture: ((dir?: 'expense' | 'income') => void) | undefined = undefined;
   export let refreshKey = 0;
 
   let invoices: Invoice[] = [];
+  let filterTab: 'all' | 'expense' | 'income' = 'all';
   let loading = true;
   let error = '';
   let previewOpen = false;
@@ -32,6 +35,38 @@
   let detailError = '';
   let detailedInvoice: Invoice | null = null;
   let detailedAllocations: InvoiceAllocation[] = [];
+
+  // Navigation par exercice comptable (N, N-1, etc.)
+  let fiscalOffset = 0;
+  let periodMode: 'fiscal' | 'all' | 'custom' = 'fiscal';
+  let filterStartDate = '';
+  let filterEndDate = '';
+
+  function isIncome(inv: Invoice): boolean {
+    return inv.direction === 'income' || inv.direction === 'EMIS' || inv.invoice_direction === 'EMIS';
+  }
+
+  $: periodInvoices = invoices.filter((inv) => {
+    if (periodMode === 'fiscal' && filterStartDate && filterEndDate) {
+      const invDate = (inv.date || '').slice(0, 10);
+      if (invDate && (invDate < filterStartDate || invDate > filterEndDate)) {
+        return false;
+      }
+    } else if (periodMode === 'custom') {
+      const invDate = (inv.date || '').slice(0, 10);
+      if (filterStartDate && invDate < filterStartDate) return false;
+      if (filterEndDate && invDate > filterEndDate) return false;
+    }
+    return true;
+  });
+
+  $: expenseCount = periodInvoices.filter((inv) => !isIncome(inv)).length;
+  $: incomeCount = periodInvoices.filter((inv) => isIncome(inv)).length;
+  $: filteredInvoices = periodInvoices.filter((inv) => {
+    if (filterTab === 'expense') return !isIncome(inv);
+    if (filterTab === 'income') return isIncome(inv);
+    return true;
+  });
 
   $: allocationTotal = allocationRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
   $: invoiceTotal = Math.abs(Number(editedInvoice?.totalTtc ?? editedInvoice?.total ?? 0));
@@ -171,33 +206,116 @@
 <div class="page-stack">
   <section class="invoice-hero">
     <div>
-      <span class="eyebrow">Justificatifs</span>
+      <span class="eyebrow">Justificatifs & Facturation</span>
       <h2>Vos factures, sans effort.</h2>
-      <p>Photographiez ou importez un document. Nous en extrayons les informations, vous gardez toujours le dernier mot.</p>
-      <button class="btn btn-scan btn-large" on:click={openCapture}>
-        <Icon name="scan" size={22}/> Scanner / importer une facture
-      </button>
+      <p>Gérez vos factures reçues (dépenses fournisseurs) et émises (recettes, prestations, adhésions, subventions). Importez un fichier ou saisissez directement sans justificatif.</p>
+      <div class="hero-actions">
+        <button class="btn btn-scan btn-large" on:click={openCapture}>
+          <Icon name="scan" size={22}/> Scanner / importer une facture
+        </button>
+        <button class="btn btn-secondary btn-large" on:click={() => openManualCapture ? openManualCapture('expense') : openCapture()}>
+          <Icon name="plus" size={18}/> + Facture reçue (dépense)
+        </button>
+        <button class="btn btn-primary btn-large btn-hero-income" on:click={() => openManualCapture ? openManualCapture('income') : openCapture()}>
+          <Icon name="plus" size={18}/> + Facture émise (recette)
+        </button>
+      </div>
     </div>
     <div class="scan-illustration" aria-hidden="true">
       <div class="scan-corners"><Icon name="invoice" size={55}/><span></span></div>
-      <small>PHOTO · IMAGE · PDF</small>
+      <small>DÉPENSES · RECETTES · PDF</small>
     </div>
   </section>
 
-  <div class="section-heading">
-    <div><h3>Toutes les factures</h3><p>Documents validés et enregistrés</p></div>
+  <FiscalYearNav
+    bind:fiscalOffset
+    bind:mode={periodMode}
+    bind:filterStartDate
+    bind:filterEndDate
+    itemCount={periodInvoices.length}
+    itemLabel="factures"
+    allowCustomDates={true}
+  />
+
+  <div class="section-heading-with-tabs">
+    <div class="section-heading">
+      <div>
+        <h3>Liste des factures ({filteredInvoices.length})</h3>
+        <p>Documents validés et enregistrés pour l'association</p>
+      </div>
+    </div>
+    <div class="invoices-filter-tabs">
+      <button
+        type="button"
+        class="filter-tab"
+        class:active={filterTab === 'all'}
+        on:click={() => filterTab = 'all'}
+      >
+        Toutes ({periodInvoices.length})
+      </button>
+      <button
+        type="button"
+        class="filter-tab"
+        class:active={filterTab === 'expense'}
+        on:click={() => filterTab = 'expense'}
+      >
+        📥 Reçues / Dépenses ({expenseCount})
+      </button>
+      <button
+        type="button"
+        class="filter-tab income-tab"
+        class:active={filterTab === 'income'}
+        on:click={() => filterTab = 'income'}
+      >
+        📤 Émises / Recettes ({incomeCount})
+      </button>
+    </div>
   </div>
 
-  <AsyncState {loading} {error} empty={!invoices.length} emptyTitle="Aucune facture enregistrée" emptyText="Scannez votre première facture pour la retrouver ici." onRetry={load}>
+  <AsyncState {loading} {error} empty={!filteredInvoices.length} emptyTitle="Aucune facture dans cette vue" emptyText="Scannez ou saisissez une facture pour la retrouver ici." onRetry={load}>
     <div class="panel table-panel">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Date</th><th>Fournisseur / destinataire</th><th>N°</th><th>Ventilation</th><th class="align-center">Traité</th><th class="align-right">TTC</th><th>Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Type / Sens</th>
+              <th>Tiers</th>
+              <th>N°</th>
+              <th>Ventilation</th>
+              <th class="align-center">Traité</th>
+              <th class="align-right">TTC</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
           <tbody>
-            {#each invoices as invoice}
+            {#each filteredInvoices as invoice (invoice.id)}
               <tr>
                 <td data-label="Date">{formatDate(invoice.date)}</td>
-                <td data-label="Tiers"><strong>{invoice.supplier || invoice.recipient || '—'}</strong></td>
+                <td data-label="Type">
+                  {#if isIncome(invoice)}
+                    <span class="status-badge badge-green" title="Facture émise par l'association (gain / recette)">
+                      📤 Émise (Recette)
+                    </span>
+                  {:else}
+                    <span class="status-badge badge-blue" title="Facture reçue d'un fournisseur (dépense / charge)">
+                      📥 Reçue (Dépense)
+                    </span>
+                  {/if}
+                </td>
+                <td data-label="Tiers">
+                  {#if isIncome(invoice)}
+                    <strong>{invoice.recipient || invoice.supplier || 'Client / Adhérent inconnu'}</strong>
+                    {#if invoice.supplier}
+                      <small class="tiers-sub">Émetteur : {invoice.supplier}</small>
+                    {/if}
+                  {:else}
+                    <strong>{invoice.supplier || invoice.recipient || 'Fournisseur inconnu'}</strong>
+                    {#if invoice.recipient}
+                      <small class="tiers-sub">Dest. : {invoice.recipient}</small>
+                    {/if}
+                  {/if}
+                </td>
                 <td data-label="N°">{invoice.number || '—'}</td>
                 <td data-label="Ventilation">
                   {#if (invoice.remainingAmount ?? invoice.remaining_amount ?? 0) <= 0}
@@ -230,8 +348,17 @@
                     </span>
                   {/if}
                 </td>
-                <td data-label="TTC" class="align-right amount">{currency.format(invoice.totalTtc ?? invoice.total ?? 0)}</td>
-                <td data-label="Actions"><div class="row-actions"><button class="btn btn-secondary btn-small" on:click={() => showDocument(invoice)}><Icon name="invoice" size={16}/> Voir</button><button class="btn btn-secondary btn-small" on:click={() => editAllocations(invoice)}><Icon name="folder" size={16}/> Ventiler</button></div></td>
+                <td data-label="TTC" class="align-right amount" class:income-amount={isIncome(invoice)}>
+                  {isIncome(invoice) ? '+' : ''}{currency.format(invoice.totalTtc ?? invoice.total ?? 0)}
+                </td>
+                <td data-label="Actions">
+                  <div class="row-actions">
+                    <button class="btn btn-secondary btn-small" on:click={() => showDocument(invoice)}><Icon name="invoice" size={16}/> Voir</button>
+                    {#if (invoice.remainingAmount ?? invoice.remaining_amount ?? 0) > 0}
+                      <button class="btn btn-secondary btn-small" on:click={() => editAllocations(invoice)}><Icon name="folder" size={16}/> Ventiler</button>
+                    {/if}
+                  </div>
+                </td>
               </tr>
             {/each}
           </tbody>
@@ -242,8 +369,33 @@
 </div>
 
 <style>
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    align-items: center;
+  }
   .align-center {
     text-align: center;
+  }
+  :global(.allocation-row) {
+    display: grid !important;
+    grid-template-columns: minmax(140px, 1fr) minmax(150px, 1fr) minmax(110px, 120px) auto !important;
+    gap: 0.75rem !important;
+    align-items: flex-end !important;
+  }
+  :global(.allocation-row label) {
+    min-width: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  :global(.allocation-row label input),
+  :global(.allocation-row label select) {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    min-width: 0 !important;
   }
   .traite-icon {
     display: inline-flex;
@@ -304,6 +456,62 @@
     color: #94a3b8;
     text-align: center;
     padding: 1.5rem 0;
+  }
+  .btn-hero-income {
+    background: #16a34a !important;
+    border-color: #15803d !important;
+    color: #ffffff !important;
+  }
+  .btn-hero-income:hover {
+    background: #15803d !important;
+  }
+  .section-heading-with-tabs {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .invoices-filter-tabs {
+    display: inline-flex;
+    background: #e2e8f0;
+    padding: 0.25rem;
+    border-radius: 10px;
+    gap: 0.25rem;
+  }
+  .filter-tab {
+    border: none;
+    background: transparent;
+    padding: 0.45rem 0.85rem;
+    border-radius: 7px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #64748b;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .filter-tab:hover {
+    color: #1e293b;
+  }
+  .filter-tab.active {
+    background: #ffffff;
+    color: #0f172a;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+  .filter-tab.income-tab.active {
+    color: #15803d;
+  }
+  .tiers-sub {
+    display: block;
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-top: 0.15rem;
+  }
+  .amount.income-amount {
+    color: #15803d;
+    font-weight: 700;
   }
 </style>
 

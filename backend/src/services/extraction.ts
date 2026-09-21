@@ -9,6 +9,7 @@ export interface ExtractedAnalysis {
   siret: string | null;
   paymentMethod: string | null;
   email: string | null;
+  direction?: string | null;
   confidence: number;
   warnings: string[];
 }

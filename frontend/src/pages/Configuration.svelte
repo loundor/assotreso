@@ -62,6 +62,40 @@
   $: membersCompliant = displayedActiveCount >= minimumMembers;
   $: selectedAiProvider = aiProviders.find((provider) => provider.id === ai.provider) || aiProviders[0];
 
+  const monthNames = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  const monthNamesShort = ['JAN','FÉV','MAR','AVR','MAI','JUIN','JUIL','AOÛT','SEPT','OCT','NOV','DÉC'];
+  let fiscalDateInput: HTMLInputElement;
+
+  $: fiscalDay = Math.max(1, Math.min(31, Number(association.fiscalYearStartDay) || 1));
+  $: fiscalMonth = Math.max(1, Math.min(12, Number(association.fiscalYearStartMonth) || 1));
+  $: fiscalDateLabel = `${fiscalDay === 1 ? '1er' : fiscalDay} ${monthNames[fiscalMonth - 1] || 'Janvier'}`;
+  $: fiscalDateIso = `2026-${String(fiscalMonth).padStart(2, '0')}-${String(fiscalDay).padStart(2, '0')}`;
+
+  function openFiscalDatePicker() {
+    if (fiscalDateInput) {
+      if (typeof fiscalDateInput.showPicker === 'function') {
+        fiscalDateInput.showPicker();
+      } else {
+        fiscalDateInput.focus();
+        fiscalDateInput.click();
+      }
+    }
+  }
+
+  function handleFiscalDateChange(event: Event) {
+    const target = event.currentTarget as HTMLInputElement;
+    if (!target.value) return;
+    const parts = target.value.split('-');
+    if (parts.length === 3) {
+      const m = parseInt(parts[1], 10);
+      const d = parseInt(parts[2], 10);
+      if (!isNaN(m) && !isNaN(d)) {
+        association.fiscalYearStartMonth = m;
+        association.fiscalYearStartDay = d;
+      }
+    }
+  }
+
   function unwrap<T>(payload: unknown, key: string, fallback: T): T {
     if (payload && typeof payload === 'object' && key in payload) return (payload as Record<string, unknown>)[key] as T;
     return (payload as T) ?? fallback;
@@ -85,12 +119,67 @@
     finally { loading = false; }
   }
 
+  let uploadingLogo = false;
+  let logoVersion = Date.now();
+
+  async function handleLogoUpload(file?: File) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      showNotice('error', 'Veuillez sélectionner un fichier image valide (PNG, JPG, SVG, WebP).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showNotice('error', 'L’image du logo ne doit pas dépasser 5 Mo.');
+      return;
+    }
+    uploadingLogo = true; notice = null;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.upload<{ association: AssociationConfig; logoUrl: string }>('config/logo', formData);
+      association = { ...association, ...(res.association || {}), logoUrl: res.logoUrl || '/api/config/logo', hasLogo: true };
+      logoVersion = Date.now();
+      showNotice('success', 'Le logo a été mis à jour avec succès.');
+      window.dispatchEvent(new CustomEvent('treso:config-updated'));
+    } catch (error) {
+      showNotice('error', getErrorMessage(error));
+    } finally {
+      uploadingLogo = false;
+    }
+  }
+
+  async function deleteLogo() {
+    if (!confirm('Supprimer le logo de l’association ?')) return;
+    uploadingLogo = true; notice = null;
+    try {
+      const res = await api.delete<{ association: AssociationConfig }>('config/logo');
+      association = { ...association, ...(res.association || {}), logoUrl: null, hasLogo: false };
+      logoVersion = Date.now();
+      showNotice('success', 'Le logo a été supprimé.');
+      window.dispatchEvent(new CustomEvent('treso:config-updated'));
+    } catch (error) {
+      showNotice('error', getErrorMessage(error));
+    } finally {
+      uploadingLogo = false;
+    }
+  }
+
   async function saveAssociation() {
     saving = 'association'; notice = null;
     try {
-      const result = await api.put<AssociationConfig | { association: AssociationConfig }>('config/association', association);
-      association = { ...association, ...unwrap(result, 'association', association) };
+      const day = Number(association.fiscalYearStartDay) || 1;
+      const month = Number(association.fiscalYearStartMonth) || 1;
+      const payload: AssociationConfig = {
+        ...association,
+        fiscalYearStartDay: day,
+        fiscalYearStartMonth: month,
+        fiscalStartDay: day,
+        fiscalStartMonth: month
+      };
+      const result = await api.put<AssociationConfig | { association: AssociationConfig }>('config/association', payload);
+      association = { ...association, ...unwrap(result, 'association', association), fiscalYearStartDay: day, fiscalYearStartMonth: month };
       showNotice('success', 'Les informations de l’association ont été enregistrées.');
+      window.dispatchEvent(new CustomEvent('treso:config-updated'));
     } catch (error) { showNotice('error', getErrorMessage(error)); }
     finally { saving = ''; }
   }
@@ -321,6 +410,67 @@
     finally { saving = ''; }
   }
 
+  interface AiPromptItem {
+    id: string;
+    name: string;
+    title: string;
+    description: string;
+    content: string;
+  }
+
+  let aiPrompts: AiPromptItem[] = [];
+  let selectedPromptId = 'analyse_justificatif';
+  let promptDraft = '';
+  let loadingPrompts = false;
+  let savingPrompt = false;
+
+  $: currentPrompt = aiPrompts.find((p) => p.id === selectedPromptId) || aiPrompts[0];
+
+  function selectPrompt(id: string) {
+    selectedPromptId = id;
+    const found = aiPrompts.find((p) => p.id === id);
+    if (found) {
+      promptDraft = found.content;
+    }
+  }
+
+  async function loadAiPrompts() {
+    loadingPrompts = true;
+    try {
+      const res = await api.get<{ prompts: AiPromptItem[] }>('config/ai/prompts');
+      aiPrompts = res.prompts || [];
+      if (aiPrompts.length > 0) {
+        const active = aiPrompts.find((p) => p.id === selectedPromptId) || aiPrompts[0];
+        if (active) {
+          selectedPromptId = active.id;
+          promptDraft = active.content;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load prompts', err);
+    } finally {
+      loadingPrompts = false;
+    }
+  }
+
+  async function saveCurrentPrompt() {
+    if (!currentPrompt) return;
+    savingPrompt = true;
+    notice = null;
+    try {
+      const res = await api.put<{ prompt: AiPromptItem }>(`config/ai/prompts/${currentPrompt.id}`, { content: promptDraft });
+      const idx = aiPrompts.findIndex((p) => p.id === currentPrompt.id);
+      if (idx >= 0 && res.prompt) {
+        aiPrompts[idx] = res.prompt;
+      }
+      showNotice('success', `Le fichier de contexte « ${currentPrompt.name} » a été mis à jour avec succès.`);
+    } catch (error) {
+      showNotice('error', getErrorMessage(error));
+    } finally {
+      savingPrompt = false;
+    }
+  }
+
   onMount(() => {
     oauthCallbackUrl = `${window.location.origin}/api/config/ai/oauth/callback`;
     const receiveOauthResult = async (event: MessageEvent) => {
@@ -333,6 +483,7 @@
     };
     window.addEventListener('message', receiveOauthResult);
     void loadConfig();
+    void loadAiPrompts();
     return () => {
       clearTimeout(oauthPollTimer);
       window.removeEventListener('message', receiveOauthResult);
@@ -361,10 +512,54 @@
     {#if activeTab === 'association'}
       <form class="panel config-panel inline-form" on:submit|preventDefault={saveAssociation}>
         <div class="form-heading"><h3>Identité et coordonnées</h3><p>Informations administratives et publiques de l’association.</p></div>
+
+        <!-- Section Logo de l'association -->
+        <div class="logo-config-card">
+          <div class="logo-preview-container">
+            {#if association.hasLogo || association.logoUrl}
+              <img src={`/api/config/logo?t=${logoVersion}`} alt="Logo de l'association" class="logo-preview-image" />
+            {:else}
+              <div class="logo-preview-empty">
+                <Icon name="upload" size={26}/>
+                <span>Aucun logo</span>
+              </div>
+            {/if}
+          </div>
+          <div class="logo-config-details">
+            <div class="logo-title-wrap">
+              <strong>Logo officiel de l’association</strong>
+              <small>Ce logo s'affiche dans le menu et sur l'ensemble de l'application.</small>
+            </div>
+            <div class="logo-action-buttons">
+              <label class="btn btn-secondary btn-small upload-logo-label">
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  style="display:none"
+                  on:change={(e) => handleLogoUpload(e.currentTarget.files?.[0])}
+                  disabled={uploadingLogo}
+                />
+                <Icon name="upload" size={15}/>
+                <span>{uploadingLogo ? 'Téléversement…' : (association.hasLogo ? 'Remplacer le logo' : 'Téléverser le logo')}</span>
+              </label>
+              {#if association.hasLogo}
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-small danger-outline"
+                  on:click={deleteLogo}
+                  disabled={uploadingLogo}
+                >
+                  <Icon name="trash" size={15}/> Supprimer
+                </button>
+              {/if}
+            </div>
+          </div>
+        </div>
+
         <div class="form-grid">
           <label>Nom usuel<input bind:value={association.name} required autocomplete="organization"/></label>
           <label>Dénomination légale<input bind:value={association.legalName}/></label>
-          <label>Sigle<input bind:value={association.acronym}/></label>
+          <label>Sigle<input bind:value={association.acronym} placeholder="Ex. ADMR, GEM, AS"/></label>
           <label>Numéro RNA<input bind:value={association.rna} placeholder="W…"/></label>
           <label>SIRET<input bind:value={association.siret} inputmode="numeric"/></label>
           <label>Email<input type="email" bind:value={association.email} autocomplete="email"/></label>
@@ -376,7 +571,39 @@
           <label>Ville<input bind:value={association.city} autocomplete="address-level2"/></label>
           <label>Pays<input bind:value={association.country} autocomplete="country-name"/></label>
         </div>
-        <fieldset class="fiscal-fieldset"><legend>Début de l’exercice comptable</legend><div class="form-grid"><label>Jour<input type="number" min="1" max="31" bind:value={association.fiscalYearStartDay} required/></label><label>Mois<select bind:value={association.fiscalYearStartMonth} required>{#each ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'] as month, index}<option value={index + 1}>{month}</option>{/each}</select></label></div></fieldset>
+        <div class="fiscal-block-container">
+          <label class="fiscal-block-label" for="fiscal-picker-input">
+            Début de l’exercice comptable
+          </label>
+          <button
+            type="button"
+            class="fiscal-date-card"
+            on:click={openFiscalDatePicker}
+            title="Cliquer pour choisir le jour et le mois"
+          >
+            <div class="fiscal-date-calendar">
+              <div class="calendar-header">{monthNamesShort[fiscalMonth - 1] || 'JAN'}</div>
+              <div class="calendar-body">{fiscalDay}</div>
+            </div>
+            <div class="fiscal-date-details">
+              <span class="fiscal-date-primary">{fiscalDateLabel}</span>
+              <span class="fiscal-date-hint">Cliquez pour choisir le jour et le mois</span>
+            </div>
+            <div class="fiscal-date-cta">
+              <span class="btn btn-secondary btn-small">Choisir la date</span>
+            </div>
+          </button>
+          <input
+            id="fiscal-picker-input"
+            bind:this={fiscalDateInput}
+            type="date"
+            class="fiscal-native-input"
+            value={fiscalDateIso}
+            on:change={handleFiscalDateChange}
+            tabindex="-1"
+            aria-hidden="true"
+          />
+        </div>
         <div class="form-actions"><button class="btn btn-primary" disabled={saving === 'association'}>{saving === 'association' ? 'Enregistrement…' : 'Enregistrer l’association'}</button></div>
       </form>
     {:else if activeTab === 'members'}
@@ -486,6 +713,80 @@
         {/if}
         <div class="form-actions config-actions"><button type="button" class="btn btn-secondary" disabled={saving === 'ai-test'} on:click={testAi}>{saving === 'ai-test' ? 'Test en cours…' : 'Tester la connexion'}</button><button class="btn btn-primary" disabled={saving === 'ai'}>{saving === 'ai' ? 'Enregistrement…' : 'Enregistrer l’IA'}</button></div>
       </form>
+
+      <!-- CONTEXTES ET DIRECTIVES MARKDOWN DES IA -->
+      <section class="panel config-panel prompt-management-panel">
+        <div class="form-heading">
+          <div class="prompt-header-row">
+            <div>
+              <h3>📄 Contextes & Directives des IA (Fichiers Markdown)</h3>
+              <p>Consultez et modifiez les instructions envoyées aux modèles IA pour adapter l’extraction des factures et la forme du rapport PDF.</p>
+            </div>
+            {#if currentPrompt}
+              <span class="badge-mini subtle">Fichier : <code>{currentPrompt.name}</code></span>
+            {/if}
+          </div>
+        </div>
+
+        <div class="prompt-tabs-bar">
+          {#each aiPrompts as p}
+            <button
+              type="button"
+              class="prompt-tab-btn"
+              class:active={p.id === selectedPromptId}
+              on:click={() => selectPrompt(p.id)}
+            >
+              <span class="prompt-tab-icon">{p.id === 'analyse_justificatif' ? '🧾' : '📊'}</span>
+              <div class="prompt-tab-labels">
+                <strong>{p.name}</strong>
+                <small>{p.id === 'analyse_justificatif' ? 'Extraction factures & justificatifs' : 'Rapport financier officiel (PDF)'}</small>
+              </div>
+            </button>
+          {/each}
+        </div>
+
+        {#if currentPrompt}
+          <div class="prompt-editor-card">
+            <div class="prompt-meta-box">
+              <div class="prompt-meta-title">
+                <strong>{currentPrompt.title}</strong>
+              </div>
+              <p class="prompt-meta-desc">{currentPrompt.description}</p>
+            </div>
+
+            <div class="editor-textarea-wrapper">
+              <textarea
+                class="prompt-code-textarea"
+                bind:value={promptDraft}
+                rows="18"
+                spellcheck="false"
+                placeholder="Directives et instructions au format Markdown..."
+              ></textarea>
+            </div>
+
+            <div class="form-actions prompt-footer-actions">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                on:click={() => { if (currentPrompt) promptDraft = currentPrompt.content; }}
+                disabled={savingPrompt || promptDraft === currentPrompt.content}
+              >
+                Rétablir le texte sauvegardé
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                disabled={savingPrompt || promptDraft === currentPrompt.content}
+                on:click={saveCurrentPrompt}
+              >
+                {savingPrompt ? 'Enregistrement…' : 'Enregistrer les modifications du contexte'}
+              </button>
+            </div>
+          </div>
+        {:else if loadingPrompts}
+          <p class="field-help">Chargement des fichiers de contexte…</p>
+        {/if}
+      </section>
     {:else}
       <section class="panel config-panel">
         <div class="form-heading"><h3>État du serveur SQL</h3><p>Seules les informations techniques non sensibles communiquées par le serveur sont affichées.</p></div>
@@ -504,3 +805,266 @@
     <TerminalModal onClose={() => { showTerminalModal = false; void testAi(); }} />
   {/if}
 </div>
+
+<style>
+  .logo-config-card {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 1.2rem;
+    background: #f8faf9;
+    border: 1px solid #dce5df;
+    border-radius: 12px;
+    margin-bottom: 1.2rem;
+  }
+  .logo-preview-container {
+    width: 76px;
+    height: 76px;
+    border-radius: 12px;
+    border: 2px dashed #b8ccc2;
+    background: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .logo-preview-image {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  .logo-preview-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    color: var(--muted);
+    font-size: 0.65rem;
+    text-align: center;
+  }
+  .logo-config-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+  .logo-title-wrap strong {
+    font-size: 0.95rem;
+    color: var(--ink);
+    display: block;
+  }
+  .logo-title-wrap small {
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  .logo-action-buttons {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-top: 0.2rem;
+  }
+  .upload-logo-label {
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .fiscal-block-container {
+    margin: 1.25rem 0;
+    position: relative;
+  }
+  .fiscal-block-label {
+    display: block;
+    font-weight: 700;
+    font-size: 0.88rem;
+    color: var(--ink);
+    margin-bottom: 0.5rem;
+  }
+  .fiscal-date-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.85rem 1.15rem;
+    background: white;
+    border: 2px solid var(--line);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+    max-width: 440px;
+    text-align: left;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+  .fiscal-date-card:hover {
+    border-color: var(--green);
+    background: #fbfdfc;
+    box-shadow: 0 4px 14px rgba(23, 63, 52, 0.08);
+  }
+  .fiscal-date-calendar {
+    width: 52px;
+    height: 56px;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.04);
+    flex-shrink: 0;
+  }
+  .fiscal-date-calendar .calendar-header {
+    background: var(--green);
+    color: white;
+    font-size: 0.65rem;
+    font-weight: 800;
+    text-align: center;
+    padding: 0.15rem 0;
+    letter-spacing: 0.5px;
+  }
+  .fiscal-date-calendar .calendar-body {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--ink);
+  }
+  .fiscal-date-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .fiscal-date-primary {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .fiscal-date-hint {
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .fiscal-native-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    width: 1px;
+    height: 1px;
+    bottom: 0;
+    left: 0;
+  }
+
+  /* PROMPT MANAGEMENT PANEL */
+  .prompt-management-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    margin-top: 1.5rem;
+  }
+  .prompt-header-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .prompt-tabs-bar {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .prompt-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1.1rem;
+    background: #f4f7f5;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.2s ease;
+  }
+  .prompt-tab-btn:hover {
+    background: #eef3f0;
+    border-color: #cbd5d0;
+  }
+  .prompt-tab-btn.active {
+    background: white;
+    border-color: var(--green);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.06);
+  }
+  .prompt-tab-icon {
+    font-size: 1.4rem;
+  }
+  .prompt-tab-labels {
+    display: flex;
+    flex-direction: column;
+  }
+  .prompt-tab-labels strong {
+    font-size: 0.88rem;
+    color: var(--ink);
+  }
+  .prompt-tab-labels small {
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .prompt-editor-card {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    background: #fafcfb;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.25rem;
+  }
+  .prompt-meta-box {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid #eef2ef;
+  }
+  .prompt-meta-title strong {
+    font-size: 0.95rem;
+    color: var(--ink);
+  }
+  .prompt-meta-desc {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .editor-textarea-wrapper {
+    width: 100%;
+  }
+  .prompt-code-textarea {
+    width: 100%;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.86rem;
+    line-height: 1.55;
+    padding: 1rem;
+    background: #ffffff;
+    color: #1f2937;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    resize: vertical;
+    box-sizing: border-box;
+    outline: none;
+    transition: border-color 0.2s ease;
+  }
+  .prompt-code-textarea:focus {
+    border-color: var(--green);
+    box-shadow: 0 0 0 3px rgba(42, 157, 143, 0.15);
+  }
+  .prompt-footer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
+  }
+</style>
+

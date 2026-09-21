@@ -75,6 +75,8 @@ BEGIN
     ALTER TABLE projects ADD CONSTRAINT projects_parent_not_self CHECK (parent_id IS NULL OR parent_id <> id);
   END IF;
 END $$;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'EN_COURS' CHECK (status IN ('IDEE', 'MONTAGE', 'EN_COURS', 'TERMINE', 'AVORTE'));
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS status_reason TEXT;
 CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id);
 
 -- Sérialise les changements de hiérarchie et interdit les cycles, y compris en accès SQL direct.
@@ -204,6 +206,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   siret TEXT,
   payment_method TEXT,
   email TEXT,
+  direction TEXT NOT NULL DEFAULT 'RECU',
   validated_by UUID REFERENCES users(id) ON DELETE SET NULL,
   validated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -211,6 +214,13 @@ CREATE TABLE IF NOT EXISTS invoices (
 );
 
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS recipient TEXT;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'RECU';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_direction_check' AND conrelid = 'invoices'::regclass) THEN
+    ALTER TABLE invoices ADD CONSTRAINT invoices_direction_check CHECK (direction IN ('RECU', 'EMIS'));
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS invoice_allocations (
   id UUID PRIMARY KEY,
@@ -319,6 +329,8 @@ ALTER TABLE association_settings ADD COLUMN IF NOT EXISTS legal_name TEXT;
 ALTER TABLE association_settings ADD COLUMN IF NOT EXISTS website TEXT;
 ALTER TABLE association_settings ADD COLUMN IF NOT EXISTS address_line2 TEXT;
 ALTER TABLE association_settings ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'France';
+ALTER TABLE association_settings ADD COLUMN IF NOT EXISTS logo_path TEXT;
+ALTER TABLE association_settings ADD COLUMN IF NOT EXISTS logo_mime TEXT;
 INSERT INTO association_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS association_members (
@@ -400,3 +412,23 @@ BEGIN
       CHECK (role IN ('ADMIN', 'TRESORIER', 'PRESIDENT', 'BUREAU', 'BENEVOLE'));
   END IF;
 END $$;
+
+-- Table de rapprochement multi-paiements / partiel entre factures et opérations bancaires
+CREATE TABLE IF NOT EXISTS invoice_reconciliations (
+  id UUID PRIMARY KEY,
+  invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+  transaction_id UUID NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  reconciled_amount NUMERIC(14,2) NOT NULL CHECK (reconciled_amount > 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (invoice_id, transaction_id)
+);
+CREATE INDEX IF NOT EXISTS idx_inv_rec_invoice ON invoice_reconciliations(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_inv_rec_transaction ON invoice_reconciliations(transaction_id);
+
+INSERT INTO invoice_reconciliations (id, invoice_id, transaction_id, reconciled_amount)
+SELECT gen_random_uuid(), i.id, i.transaction_id, LEAST(ABS(COALESCE(i.total_ttc, 0)), ABS(COALESCE(t.amount, 0)))
+FROM invoices i
+JOIN transactions t ON t.id = i.transaction_id
+WHERE i.transaction_id IS NOT NULL AND LEAST(ABS(COALESCE(i.total_ttc, 0)), ABS(COALESCE(t.amount, 0))) > 0
+ON CONFLICT (invoice_id, transaction_id) DO NOTHING;

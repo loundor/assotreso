@@ -26,6 +26,14 @@ async function validateParent(client: PoolClient, projectId: string, parentId: s
   }
 }
 
+const PROJECT_STATUSES = new Set(['IDEE', 'MONTAGE', 'EN_COURS', 'TERMINE', 'AVORTE']);
+
+function parseStatus(value: unknown): string {
+  const parsed = (optionalString(value) ?? 'EN_COURS').toUpperCase();
+  if (!PROJECT_STATUSES.has(parsed)) throw new ApiError(400, 'Statut de projet invalide (IDEE, MONTAGE, EN_COURS, TERMINE, AVORTE).', 'VALIDATION');
+  return parsed;
+}
+
 export const projectRoutes: FastifyPluginAsync = async (app) => {
   app.get('/projects', { preHandler: app.authenticate }, async () => ({
     projects: await query(`SELECT p.*,p.parent_id AS "parentId",
@@ -38,15 +46,17 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     const body = objectBody(request.body);
     const id = randomUUID();
     const parentId = optionalString(body.parentId);
+    const status = parseStatus(body.status);
+    const statusReason = optionalString(body.statusReason ?? body.status_reason);
     const project = await withTransaction(async (client) => {
       await client.query('SELECT pg_advisory_xact_lock(82620261)');
       await validateParent(client, id, parentId);
       const result = await client.query(
-        `INSERT INTO projects (id,name,description,budget,starts_on,ends_on,active,parent_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *,parent_id AS "parentId"`,
-        [id, requiredString(body.name, 'nom'), optionalString(body.description), optionalNumeric(body.budget, 'budget'), optionalString(body.startsOn), optionalString(body.endsOn), booleanValue(body.active, true), parentId]
+        `INSERT INTO projects (id,name,description,budget,starts_on,ends_on,active,parent_id,status,status_reason)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *,parent_id AS "parentId"`,
+        [id, requiredString(body.name, 'nom'), optionalString(body.description), optionalNumeric(body.budget, 'budget'), optionalString(body.startsOn), optionalString(body.endsOn), booleanValue(body.active, true), parentId, status, statusReason]
       );
-      await audit(client, request.user.sub, 'CREATE', 'project', id, { parentId });
+      await audit(client, request.user.sub, 'CREATE', 'project', id, { parentId, status });
       return result.rows[0];
     });
     return reply.code(201).send({ project });
@@ -55,17 +65,19 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
   app.put<{ Params: { id: string } }>('/projects/:id', { preHandler: app.authenticate }, async (request) => {
     const body = objectBody(request.body);
     const parentId = optionalString(body.parentId);
+    const status = parseStatus(body.status);
+    const statusReason = optionalString(body.statusReason ?? body.status_reason);
     const project = await withTransaction(async (client) => {
       await client.query('SELECT pg_advisory_xact_lock(82620261)');
       const existing = await client.query('SELECT id FROM projects WHERE id=$1 FOR UPDATE', [request.params.id]);
       if (!existing.rowCount) throw new ApiError(404, 'Projet introuvable.', 'PROJET_INTROUVABLE');
       await validateParent(client, request.params.id, parentId);
       const result = await client.query(
-        `UPDATE projects SET name=$2,description=$3,budget=$4,starts_on=$5,ends_on=$6,active=$7,parent_id=$8,updated_at=now()
+        `UPDATE projects SET name=$2,description=$3,budget=$4,starts_on=$5,ends_on=$6,active=$7,parent_id=$8,status=$9,status_reason=$10,updated_at=now()
          WHERE id=$1 RETURNING *,parent_id AS "parentId"`,
-        [request.params.id, requiredString(body.name, 'nom'), optionalString(body.description), optionalNumeric(body.budget, 'budget'), optionalString(body.startsOn), optionalString(body.endsOn), booleanValue(body.active, true), parentId]
+        [request.params.id, requiredString(body.name, 'nom'), optionalString(body.description), optionalNumeric(body.budget, 'budget'), optionalString(body.startsOn), optionalString(body.endsOn), booleanValue(body.active, true), parentId, status, statusReason]
       );
-      await audit(client, request.user.sub, 'UPDATE', 'project', request.params.id, { parentId });
+      await audit(client, request.user.sub, 'UPDATE', 'project', request.params.id, { parentId, status });
       return result.rows[0];
     });
     return { project };

@@ -1,4 +1,4 @@
-export type PageId = 'dashboard' | 'accounts' | 'transactions' | 'invoices' | 'reconciliation' | 'categories' | 'projects' | 'configuration';
+export type PageId = 'dashboard' | 'accounts' | 'transactions' | 'invoices' | 'reconciliation' | 'categories' | 'projects' | 'reports' | 'configuration';
 export type UserRole = 'ADMIN' | 'TRESORIER' | 'PRESIDENT' | 'BUREAU' | 'BENEVOLE';
 
 export interface User {
@@ -25,6 +25,8 @@ export interface AssociationConfig {
   country?: string;
   fiscalYearStartDay?: number;
   fiscalYearStartMonth?: number;
+  hasLogo?: boolean;
+  logoUrl?: string | null;
   [key: string]: unknown;
 }
 
@@ -127,6 +129,9 @@ export interface Project {
   active?: boolean;
   parent_id?: string | null;
   parentId?: string | null;
+  status?: 'IDEE' | 'MONTAGE' | 'EN_COURS' | 'TERMINE' | 'AVORTE';
+  status_reason?: string | null;
+  statusReason?: string | null;
   income?: number;
   expense?: number;
 }
@@ -165,6 +170,10 @@ export interface Transaction {
   project?: Project | string;
   project_name?: string | null;
   projectName?: string | null;
+  totalAmount?: number;
+  reconciledAmount?: number;
+  remainingAmount?: number;
+  reconciliationPercent?: number;
 }
 
 export interface Invoice {
@@ -181,6 +190,7 @@ export interface Invoice {
   totalTtc?: number;
   status?: string;
   direction?: string;
+  invoice_direction?: string;
   type?: string;
   is_reconciled?: boolean;
   reconciled?: boolean;
@@ -191,6 +201,10 @@ export interface Invoice {
   allocatedAmount?: number;
   remaining_amount?: number;
   remainingAmount?: number;
+  totalAmount?: number;
+  reconciledAmount?: number;
+  reconciliationPercent?: number;
+  remainingAllocationAmount?: number;
   allocations?: InvoiceAllocation[];
 }
 
@@ -236,12 +250,18 @@ export interface CapturedDocument {
 }
 
 export interface ReconciledPair {
+  reconciliation_id?: string;
+  reconciled_amount?: number;
   invoice_id: string;
   invoice_number?: string;
   invoice_date?: string;
   invoice_supplier?: string;
   invoice_recipient?: string;
+  direction?: string;
+  invoice_direction?: string;
   invoice_total_ttc?: number;
+  invoice_reconciled_total?: number;
+  invoice_reconciliation_percent?: number;
   document_id?: string;
   document_name?: string;
   document_mime_type?: string;
@@ -251,6 +271,8 @@ export interface ReconciledPair {
   transaction_description: string;
   transaction_bank_label?: string;
   transaction_payment_method?: string;
+  transaction_reconciled_total?: number;
+  transaction_reconciliation_percent?: number;
   account_name?: string;
   reconciled_at?: string;
 }

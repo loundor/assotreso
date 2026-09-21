@@ -31,11 +31,21 @@ interface InvoiceTotalRow {
   total_ttc: string | number | null;
 }
 
-function clientAnalysis(analysis: ExtractedAnalysis, documentId: string): Record<string, unknown> {
+function normalizeInvoiceDirection(value: unknown): 'RECU' | 'EMIS' {
+  const str = String(value ?? '').trim().toUpperCase();
+  if (['EMIS', 'EMISE', 'INCOME', 'RECETTE', 'GAIN', 'VENTE', 'CREDIT'].includes(str)) {
+    return 'EMIS';
+  }
+  return 'RECU';
+}
+
+function clientAnalysis(analysis: ExtractedAnalysis, documentId: string, preferredDirection?: string): Record<string, unknown> {
+  const normalizedDirection = preferredDirection ? normalizeInvoiceDirection(preferredDirection) : normalizeInvoiceDirection(analysis.direction);
   return {
     ...analysis,
     type: 'invoice',
-    direction: 'expense',
+    direction: normalizedDirection === 'EMIS' ? 'income' : 'expense',
+    invoice_direction: normalizedDirection,
     number: analysis.invoiceNumber,
     date: analysis.invoiceDate,
     subtotal: analysis.totalHt,
@@ -131,11 +141,18 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
   app.get('/invoices', { preHandler: app.authenticate }, async () => ({
     invoices: await query(
       `SELECT i.*,i.invoice_number AS number,i.invoice_date AS date,i.total_ttc::float8 AS total,
-        'invoice' AS type,CASE WHEN COALESCE(i.total_ttc,0) >= 0 THEN 'expense' ELSE 'income' END AS direction,
+        'invoice' AS type,
+        CASE WHEN i.direction = 'EMIS' THEN 'income' ELSE 'expense' END AS direction,
+        i.direction AS invoice_direction,
         'VALIDE' AS status,d.original_name,d.mime_type,t.description AS transaction_description,
-        (i.transaction_id IS NOT NULL OR d.transaction_id IS NOT NULL) AS is_reconciled,
-        (i.transaction_id IS NOT NULL OR d.transaction_id IS NOT NULL) AS reconciled,
-        (i.transaction_id IS NOT NULL OR d.transaction_id IS NOT NULL) AS "isReconciled",
+        COALESCE(rec.reconciled_amount, 0)::float8 AS "reconciledAmount",
+        CASE
+          WHEN ABS(COALESCE(i.total_ttc, 0)) > 0 THEN LEAST(100.0, ROUND((COALESCE(rec.reconciled_amount, 0) / ABS(COALESCE(i.total_ttc, 0))) * 100.0, 1))::float8
+          ELSE 100.0
+        END AS "reconciliationPercent",
+        (COALESCE(rec.reconciled_amount, 0) >= ABS(COALESCE(i.total_ttc, 0)) - 0.009 AND ABS(COALESCE(i.total_ttc, 0)) > 0) AS is_reconciled,
+        (COALESCE(rec.reconciled_amount, 0) >= ABS(COALESCE(i.total_ttc, 0)) - 0.009 AND ABS(COALESCE(i.total_ttc, 0)) > 0) AS reconciled,
+        (COALESCE(rec.reconciled_amount, 0) >= ABS(COALESCE(i.total_ttc, 0)) - 0.009 AND ABS(COALESCE(i.total_ttc, 0)) > 0) AS "isReconciled",
         i.transaction_id AS "transactionId",
         COALESCE(a.allocated_amount,0)::float8 AS allocated_amount,
         COALESCE(a.allocated_amount,0)::float8 AS "allocatedAmount",
@@ -143,6 +160,7 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
         GREATEST(ABS(COALESCE(i.total_ttc,0))-COALESCE(a.allocated_amount,0),0)::float8 AS "remainingAmount"
        FROM invoices i JOIN documents d ON d.id=i.document_id LEFT JOIN transactions t ON t.id=i.transaction_id
        LEFT JOIN LATERAL (SELECT SUM(amount) AS allocated_amount FROM invoice_allocations WHERE invoice_id=i.id) a ON true
+       LEFT JOIN LATERAL (SELECT SUM(reconciled_amount) AS reconciled_amount FROM invoice_reconciliations WHERE invoice_id=i.id) rec ON true
        ORDER BY i.invoice_date DESC NULLS LAST,i.created_at DESC`
     )
   }));
@@ -150,10 +168,17 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Params: { id: string } }>('/invoices/:id', { preHandler: app.authenticate }, async (request) => {
     const invoices = await query<Record<string, unknown>>(
       `SELECT i.*,i.invoice_number AS number,i.invoice_date AS date,i.total_ttc::float8 AS total,
+        CASE WHEN i.direction = 'EMIS' THEN 'income' ELSE 'expense' END AS direction,
+        i.direction AS invoice_direction,
         d.original_name,d.mime_type,d.status AS document_status,
-        (i.transaction_id IS NOT NULL OR d.transaction_id IS NOT NULL) AS is_reconciled,
-        (i.transaction_id IS NOT NULL OR d.transaction_id IS NOT NULL) AS reconciled,
-        (i.transaction_id IS NOT NULL OR d.transaction_id IS NOT NULL) AS "isReconciled",
+        COALESCE(rec.reconciled_amount, 0)::float8 AS "reconciledAmount",
+        CASE
+          WHEN ABS(COALESCE(i.total_ttc, 0)) > 0 THEN LEAST(100.0, ROUND((COALESCE(rec.reconciled_amount, 0) / ABS(COALESCE(i.total_ttc, 0))) * 100.0, 1))::float8
+          ELSE 100.0
+        END AS "reconciliationPercent",
+        (COALESCE(rec.reconciled_amount, 0) >= ABS(COALESCE(i.total_ttc, 0)) - 0.009 AND ABS(COALESCE(i.total_ttc, 0)) > 0) AS is_reconciled,
+        (COALESCE(rec.reconciled_amount, 0) >= ABS(COALESCE(i.total_ttc, 0)) - 0.009 AND ABS(COALESCE(i.total_ttc, 0)) > 0) AS reconciled,
+        (COALESCE(rec.reconciled_amount, 0) >= ABS(COALESCE(i.total_ttc, 0)) - 0.009 AND ABS(COALESCE(i.total_ttc, 0)) > 0) AS "isReconciled",
         i.transaction_id AS "transactionId",
         COALESCE(a.allocated_amount,0)::float8 AS allocated_amount,
         COALESCE(a.allocated_amount,0)::float8 AS "allocatedAmount",
@@ -161,6 +186,7 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
         GREATEST(ABS(COALESCE(i.total_ttc,0))-COALESCE(a.allocated_amount,0),0)::float8 AS "remainingAmount"
        FROM invoices i JOIN documents d ON d.id=i.document_id
        LEFT JOIN LATERAL (SELECT SUM(amount) AS allocated_amount FROM invoice_allocations WHERE invoice_id=i.id) a ON true
+       LEFT JOIN LATERAL (SELECT SUM(reconciled_amount) AS reconciled_amount FROM invoice_reconciliations WHERE invoice_id=i.id) rec ON true
        WHERE i.id=$1`,
       [request.params.id]
     );
@@ -190,11 +216,15 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
   app.post('/mobile/capture', { preHandler: app.authenticate }, async (request, reply) => {
     let transactionId: string | null = null;
     let useAi = false;
+    let preferredDirection: string | null = null;
     let upload: StoredUpload | null = null;
     try {
       for await (const part of request.parts()) {
         if (part.type === 'field' && part.fieldname === 'transactionId') transactionId = String(part.value) || null;
         if (part.type === 'field' && part.fieldname === 'useAi') useAi = ['true', '1', 'oui'].includes(String(part.value).toLowerCase());
+        if (part.type === 'field' && (part.fieldname === 'direction' || part.fieldname === 'financialDirection')) {
+          preferredDirection = String(part.value) || null;
+        }
         if (part.type === 'file') {
           if (part.fieldname !== 'file') {
             part.file.resume();
@@ -236,7 +266,7 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
             extracted = { ...extracted, warnings: [...extracted.warnings, "L'analyse IA a échoué ; l'analyse locale a été conservée."] };
           }
         }
-        const analysis = clientAnalysis(extracted, documentId);
+        const analysis = clientAnalysis(extracted, documentId, preferredDirection ?? undefined);
         const rows = await query<DocumentRow>(
           `UPDATE documents SET ocr_text=$2,analysis=$3::jsonb,status='A_VALIDER',updated_at=now() WHERE id=$1 RETURNING *`,
           [documentId, result.text, JSON.stringify(analysis)]
@@ -286,6 +316,10 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
     );
     const document = rows[0];
     if (!document) throw new ApiError(404, 'Justificatif introuvable.', 'DOCUMENT_INTROUVABLE');
+    if (document.mime_type === 'application/x-manual-entry') {
+      reply.type('text/html; charset=utf-8');
+      return reply.send('<div style="font-family:system-ui,-apple-system,sans-serif;padding:3rem;text-align:center;color:#475569;"><h3>Facture saisie manuellement</h3><p>Aucun fichier numérique n’a été téléversé pour cette facture.</p></div>');
+    }
     reply.type(document.mime_type);
     reply.header('Content-Disposition', `inline; filename="${document.original_name.replace(/["\r\n]/g, '_')}"`);
     return reply.send(createReadStream(storedFilePath(document.stored_name)));
@@ -297,21 +331,33 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
     const transactionId = optionalString(body.transactionId ?? analysis.transactionId);
     const projectId = optionalString(body.projectId ?? analysis.projectId);
     const categoryId = optionalString(body.categoryId ?? analysis.categoryId);
+    const direction = normalizeInvoiceDirection(body.direction ?? body.invoiceDirection ?? analysis.direction ?? analysis.financialDirection);
+    const supplier = optionalString(analysis.supplier ?? body.supplier);
+    const recipient = optionalString(analysis.recipient ?? body.recipient);
+    const invoiceDate = optionalString(analysis.invoiceDate ?? analysis.date ?? body.date);
+    const totalTtc = optionalNumeric(analysis.totalTtc ?? analysis.total ?? body.total, 'montant TTC');
+    const totalHt = optionalNumeric(analysis.totalHt ?? analysis.subtotal ?? body.subtotal, 'montant HT');
+    const vatAmount = optionalNumeric(analysis.vatAmount ?? analysis.tax ?? body.tax, 'TVA');
+    const invoiceNumber = optionalString(analysis.invoiceNumber ?? analysis.number ?? body.number);
+    const siret = optionalString(analysis.siret ?? body.siret);
+    const paymentMethod = optionalString(analysis.paymentMethod ?? body.paymentMethod);
+    const email = optionalString(analysis.email ?? body.email);
+
     const invoice = await withTransaction(async (client) => {
       const documentResult = await client.query<DocumentRow>('SELECT * FROM documents WHERE id=$1 FOR UPDATE', [request.params.id]);
       const document = documentResult.rows[0];
       if (!document) throw new ApiError(404, 'Justificatif introuvable.', 'DOCUMENT_INTROUVABLE');
       const id = randomUUID();
       const result = await client.query<InvoiceTotalRow>(
-        `INSERT INTO invoices (id,document_id,transaction_id,supplier,recipient,invoice_date,total_ttc,total_ht,vat_amount,invoice_number,siret,payment_method,email,validated_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        `INSERT INTO invoices (id,document_id,transaction_id,supplier,recipient,invoice_date,total_ttc,total_ht,vat_amount,invoice_number,siret,payment_method,email,direction,validated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
          ON CONFLICT (document_id) DO UPDATE SET transaction_id=EXCLUDED.transaction_id,supplier=EXCLUDED.supplier,
            recipient=EXCLUDED.recipient,invoice_date=EXCLUDED.invoice_date,total_ttc=EXCLUDED.total_ttc,total_ht=EXCLUDED.total_ht,
            vat_amount=EXCLUDED.vat_amount,invoice_number=EXCLUDED.invoice_number,siret=EXCLUDED.siret,
-           payment_method=EXCLUDED.payment_method,email=EXCLUDED.email,validated_by=EXCLUDED.validated_by,
+           payment_method=EXCLUDED.payment_method,email=EXCLUDED.email,direction=EXCLUDED.direction,validated_by=EXCLUDED.validated_by,
            validated_at=now(),updated_at=now()
          RETURNING *`,
-        [id, request.params.id, transactionId, optionalString(analysis.supplier), optionalString(analysis.recipient), optionalString(analysis.invoiceDate ?? analysis.date), optionalNumeric(analysis.totalTtc ?? analysis.total, 'montant TTC'), optionalNumeric(analysis.totalHt ?? analysis.subtotal, 'montant HT'), optionalNumeric(analysis.vatAmount ?? analysis.tax, 'TVA'), optionalString(analysis.invoiceNumber ?? analysis.number), optionalString(analysis.siret), optionalString(analysis.paymentMethod), optionalString(analysis.email), request.user.sub]
+        [id, request.params.id, transactionId, supplier, recipient, invoiceDate, totalTtc, totalHt, vatAmount, invoiceNumber, siret, paymentMethod, email, direction, request.user.sub]
       );
       const savedInvoice = result.rows[0];
       if (!savedInvoice) throw new ApiError(500, 'La facture n’a pas pu être enregistrée.', 'ERREUR_FACTURE');
@@ -335,9 +381,66 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
         `UPDATE documents SET transaction_id=$2,analysis=$3::jsonb,status='VALIDE',updated_at=now() WHERE id=$1`,
         [request.params.id, transactionId, JSON.stringify(analysis)]
       );
-      await audit(client, request.user.sub, 'VALIDATE', 'document', request.params.id, { invoiceId: savedInvoice.id, transactionId, projectId, categoryId, allocations });
+      await audit(client, request.user.sub, 'VALIDATE', 'document', request.params.id, { invoiceId: savedInvoice.id, transactionId, projectId, categoryId, allocations, direction });
       return savedInvoice;
     });
     return reply.code(200).send({ invoice });
+  });
+
+  // Création directe d'une facture sans justificatif fichier
+  app.post('/invoices/manual', { preHandler: app.authenticate }, async (request, reply) => {
+    const body = objectBody(request.body);
+    const direction = normalizeInvoiceDirection(body.direction ?? body.invoiceDirection);
+    const supplier = optionalString(body.supplier);
+    const recipient = optionalString(body.recipient);
+    const invoiceNumber = optionalString(body.invoiceNumber ?? body.number);
+    const invoiceDate = optionalString(body.invoiceDate ?? body.date);
+    const totalTtc = optionalNumeric(body.totalTtc ?? body.total, 'montant TTC');
+    const totalHt = optionalNumeric(body.totalHt ?? body.subtotal, 'montant HT');
+    const vatAmount = optionalNumeric(body.vatAmount ?? body.tax, 'TVA');
+    const paymentMethod = optionalString(body.paymentMethod);
+    const email = optionalString(body.email);
+    const transactionId = optionalString(body.transactionId);
+    const projectId = optionalString(body.projectId);
+    const categoryId = optionalString(body.categoryId);
+
+    const invoice = await withTransaction(async (client) => {
+      const documentId = randomUUID();
+      const storedName = `manual/${documentId}.txt`;
+      const docLabel = direction === 'EMIS'
+        ? (recipient ? `Facture émise - ${recipient}` : 'Facture émise (recette)')
+        : (supplier ? `Facture reçue - ${supplier}` : 'Facture reçue (dépense)');
+      await client.query(
+        `INSERT INTO documents (id, original_name, stored_name, mime_type, size_bytes, uploaded_by, transaction_id, status)
+         VALUES ($1, $2, $3, 'application/x-manual-entry', 1, $4, $5, 'VALIDE')`,
+        [documentId, docLabel, storedName, request.user.sub, transactionId]
+      );
+
+      const invoiceId = randomUUID();
+      const result = await client.query<InvoiceTotalRow>(
+        `INSERT INTO invoices (id, document_id, transaction_id, supplier, recipient, invoice_date, total_ttc, total_ht, vat_amount, invoice_number, payment_method, email, direction, validated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+        [invoiceId, documentId, transactionId, supplier, recipient, invoiceDate, totalTtc, totalHt, vatAmount, invoiceNumber, paymentMethod, email, direction, request.user.sub]
+      );
+      const savedInvoice = result.rows[0];
+      if (!savedInvoice) throw new ApiError(500, 'La facture n’a pas pu être enregistrée.', 'ERREUR_FACTURE');
+
+      if (Array.isArray(body.allocations)) {
+        await replaceAllocations(client, savedInvoice.id, body.allocations);
+      } else if (projectId || categoryId) {
+        if (savedInvoice.total_ttc !== null && absoluteMoneyCents(savedInvoice.total_ttc, 'montant TTC') > 0) {
+          await replaceAllocations(client, savedInvoice.id, [{
+            projectId,
+            categoryId,
+            amount: (absoluteMoneyCents(savedInvoice.total_ttc, 'montant TTC') / 100).toFixed(2)
+          }]);
+        }
+      }
+
+      await audit(client, request.user.sub, 'CREATE_MANUAL', 'invoice', savedInvoice.id, { totalTtc, supplier, recipient, direction });
+      return savedInvoice;
+    });
+
+    return reply.code(201).send({ invoice });
   });
 };

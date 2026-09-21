@@ -24,6 +24,27 @@ test('fusionne uniquement les valeurs IA valides', () => {
   assert.deepEqual(merged.warnings, local.warnings);
 });
 
+test('fusionne les données d’un ticket ou reçu avec clés en français et montants formattés', () => {
+  const merged = mergeAiAnalysis(local, {
+    fournisseur: 'Carrefour Express',
+    destinataire: 'Association Gem',
+    numero: 'TKT-9912',
+    date: '2026-09-18',
+    ht: '20,42 €',
+    tva: '4.08',
+    ttc: '24,50 €',
+    sens: 'DEPENSE'
+  });
+  assert.equal(merged.supplier, 'Carrefour Express');
+  assert.equal(merged.recipient, 'Association Gem');
+  assert.equal(merged.invoiceNumber, 'TKT-9912');
+  assert.equal(merged.invoiceDate, '2026-09-18');
+  assert.equal(merged.totalHt, 20.42);
+  assert.equal(merged.vatAmount, 4.08);
+  assert.equal(merged.totalTtc, 24.50);
+  assert.equal(merged.direction, 'RECU');
+});
+
 test('ignore une réponse IA qui n’est pas un objet', () => {
   assert.deepEqual(mergeAiAnalysis(local, 'invalide'), local);
 });

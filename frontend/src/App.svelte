@@ -6,6 +6,7 @@
   import Transactions from './pages/Transactions.svelte';
   import Invoices from './pages/Invoices.svelte';
   import Reconciliation from './pages/Reconciliation.svelte';
+  import Reports from './pages/Reports.svelte';
   import Resources from './pages/Resources.svelte';
   import Configuration from './pages/Configuration.svelte';
   import Shell from './components/Shell.svelte';
@@ -17,8 +18,10 @@
   let checkingAuth = true;
   let page: PageId = 'dashboard';
   let captureOpen = false;
+  let captureMode: 'upload' | 'manual' = 'upload';
+  let captureDirection: 'expense' | 'income' = 'expense';
   let invoiceRefresh = 0;
-  const validPages: PageId[] = ['dashboard','accounts','transactions','invoices','reconciliation','categories','projects','configuration'];
+  const validPages: PageId[] = ['dashboard','accounts','transactions','invoices','reconciliation','reports','categories','projects','configuration'];
 
   function pageFromHash(): PageId {
     const candidate = location.hash.replace('#/', '') as PageId;
@@ -35,6 +38,12 @@
   function unauthorized() { logout(); }
   function handleHash() { page = pageFromHash(); }
   function captureSuccess() { invoiceRefresh += 1; navigate('invoices'); }
+
+  function startCapture(mode: 'upload' | 'manual' = 'upload', direction: 'expense' | 'income' = 'expense') {
+    captureMode = mode;
+    captureDirection = direction;
+    captureOpen = true;
+  }
 
   onMount(async () => {
     page = pageFromHash();
@@ -53,15 +62,16 @@
 {:else if !user}
   <Login onSuccess={(loggedUser) => { user = loggedUser; navigate('dashboard'); }} />
 {:else}
-  <Shell {page} {user} {navigate} openCapture={() => captureOpen = true} {logout}>
-    {#if page === 'dashboard'}<Dashboard openCapture={() => captureOpen = true} navigate={(target) => navigate(target)} />
+  <Shell {page} {user} {navigate} openCapture={() => startCapture('upload')} {logout}>
+    {#if page === 'dashboard'}<Dashboard openCapture={() => startCapture('upload')} navigate={(target) => navigate(target)} />
     {:else if page === 'accounts'}<Accounts />
     {:else if page === 'transactions'}<Transactions />
-    {:else if page === 'invoices'}<Invoices openCapture={() => captureOpen = true} refreshKey={invoiceRefresh} />
+    {:else if page === 'invoices'}<Invoices openCapture={() => startCapture('upload')} openManualCapture={(dir?: 'expense' | 'income') => startCapture('manual', dir ?? 'expense')} refreshKey={invoiceRefresh} />
     {:else if page === 'reconciliation'}<Reconciliation />
+    {:else if page === 'reports'}<Reports />
     {:else if page === 'categories'}<Resources kind="categories" />
     {:else if page === 'projects'}<Resources kind="projects" />
     {:else if page === 'configuration' && user.role === 'ADMIN'}<Configuration />{/if}
   </Shell>
-  {#if captureOpen}<InvoiceCapture onClose={() => captureOpen = false} onSuccess={captureSuccess} />{/if}
+  {#if captureOpen}<InvoiceCapture mode={captureMode} initialDirection={captureDirection} onClose={() => captureOpen = false} onSuccess={captureSuccess} />{/if}
 {/if}
