@@ -565,8 +565,9 @@
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
     width: 100%;
     max-width: 580px;
-    max-height: 90vh;
+    max-height: calc(100dvh - 2rem);
     overflow-y: auto;
+    overscroll-behavior: contain;
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
@@ -719,5 +720,21 @@
 
   .btn-confirm-submit:hover:not(:disabled) {
     background: #1e293b;
+  }
+
+  @media (max-width: 600px) {
+    .section-heading-with-tabs { align-items: stretch; }
+    .transactions-filter-tabs { display: grid; grid-template-columns: 1fr; width: 100%; }
+    .filter-tab { min-height: 42px; white-space: normal; }
+    .confirm-modal-layer { align-items: flex-end; padding: 0; }
+    .confirm-modal-box { max-width: none; max-height: calc(100dvh - max(.5rem, env(safe-area-inset-top))); border-radius: 18px 18px 0 0; gap: 1rem; padding: 1rem; }
+    .confirm-title-wrap { align-items: flex-start; min-width: 0; }
+    .confirm-icon-badge { font-size: 1.3rem; }
+    .close-btn { width: 40px; height: 40px; flex: none; }
+    .confirm-alert-box { padding: 0.75rem; }
+    .recap-row { align-items: flex-start; flex-direction: column; gap: 0.25rem; }
+    .recap-val { text-align: left; width: 100%; }
+    .confirm-modal-footer { align-items: stretch; flex-direction: column-reverse; gap: 0.75rem; }
+    .confirm-modal-footer .btn { width: 100%; }
   }
 </style>

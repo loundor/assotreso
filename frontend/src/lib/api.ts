@@ -1,4 +1,4 @@
-import type { User } from './types';
+import type { AuthResponse, AuthStatus, InitialSetupPayload, User } from './types';
 
 const API_BASE = '/api';
 const TOKEN_KEY = 'treso_token';
@@ -55,7 +55,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   const isJson = response.headers.get('content-type')?.includes('application/json');
   const payload = response.status === 204 ? null : isJson ? await response.json() : await response.text();
   if (!response.ok) {
-    if (response.status === 401 && path !== 'auth/login') {
+    if (response.status === 401 && path !== 'auth/login' && path !== 'auth/setup') {
       clearToken();
       window.dispatchEvent(new CustomEvent('treso:unauthorized'));
     }
@@ -87,7 +87,11 @@ async function download(path: string): Promise<Blob> {
 }
 
 export const api = {
-  login: (email: string, password: string) => request<{ token: string; user: User }>('auth/login', {
+  authStatus: () => request<AuthStatus>('auth/status'),
+  setup: (payload: InitialSetupPayload) => request<AuthResponse>('auth/setup', {
+    method: 'POST', body: JSON.stringify(payload)
+  }),
+  login: (email: string, password: string) => request<AuthResponse>('auth/login', {
     method: 'POST', body: JSON.stringify({ email, password })
   }),
   me: () => request<User>('auth/me'),

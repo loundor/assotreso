@@ -26,14 +26,24 @@ docker compose up --build
 
 L’application est ensuite disponible sur <http://localhost:8080>.
 
-Compte de démonstration :
+Par défaut, `DEMO_MODE=false` : aucune donnée métier ni aucun utilisateur n’est créé. À la première ouverture, l’écran **Première utilisation** permet de créer le premier compte administrateur.
+
+Pour lancer explicitement une démonstration avec `backend/sql/002_demo_seed.sql` :
+
+```bash
+DEMO_MODE=true docker compose up --build
+```
+
+Le compte de démonstration est alors :
 
 - e-mail : `tresorier@demo.fr`
 - mot de passe : `demo1234`
 
+Le mode réellement appliqué est enregistré en base. Le seed démo n’est exécuté qu’une fois, sur une base vide, et n’est jamais rejoué lors des redémarrages.
+
 > Modifiez impérativement `POSTGRES_PASSWORD` et `JWT_SECRET` dans `.env` avant une mise en production.
 
-Les migrations et les données de démonstration sont appliquées automatiquement au premier démarrage. Les données PostgreSQL et les documents sont conservés dans des volumes Docker.
+Les migrations sont appliquées automatiquement au démarrage. Les données PostgreSQL et les documents sont conservés dans des volumes Docker. Changer `DEMO_MODE` ou reconstruire les images ne vide pas un volume existant. Pour repartir volontairement d’une base vierge, utilisez `docker compose down -v` avant de relancer — cette commande supprime définitivement les données locales.
 
 ## Développement local
 

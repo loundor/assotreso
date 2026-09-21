@@ -1066,5 +1066,17 @@
     gap: 0.75rem;
     margin-top: 0.25rem;
   }
+  @media (max-width: 600px) {
+    .logo-config-card { align-items: flex-start; flex-direction: column; padding: 1rem; }
+    .logo-config-details,.logo-action-buttons,.logo-action-buttons .btn,.upload-logo-label { width: 100%; }
+    .logo-action-buttons { align-items: stretch; flex-direction: column; }
+    .fiscal-date-card { padding: 0.75rem; }
+    .prompt-tabs-bar { display: grid; grid-template-columns: 1fr; width: 100%; }
+    .prompt-tab-btn { width: 100%; }
+    .prompt-editor-card { padding: 0.85rem; }
+    .prompt-code-textarea { min-height: 280px; padding: 0.75rem; }
+    .prompt-footer-actions { align-items: stretch; flex-direction: column-reverse; }
+    .prompt-footer-actions .btn { width: 100%; }
+  }
 </style>
 

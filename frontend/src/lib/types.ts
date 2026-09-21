@@ -9,6 +9,23 @@ export interface User {
   active?: boolean;
 }
 
+export interface AuthStatus {
+  setupRequired: boolean;
+  demoMode: boolean;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: User;
+}
+
+export interface InitialSetupPayload {
+  name: string;
+  email: string;
+  password: string;
+  passwordConfirmation: string;
+}
+
 export interface AssociationConfig {
   name?: string;
   legalName?: string;

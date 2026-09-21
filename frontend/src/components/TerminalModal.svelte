@@ -13,6 +13,7 @@
   let fitAddon: FitAddon | null = null;
   let sessionId = '';
   let eventSource: EventSource | null = null;
+  let resizeObserver: ResizeObserver | null = null;
   let statusText = 'Connexion au terminal du serveur...';
   let starting = false;
 
@@ -124,10 +125,14 @@
         void api.post(`config/ai/terminal/${sessionId}/resize`, { cols: terminal.cols, rows: terminal.rows }).catch(() => undefined);
       }
     };
+    resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(terminalContainer);
     window.addEventListener('resize', handleResize);
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      resizeObserver?.disconnect();
+      resizeObserver = null;
     };
   });
 
@@ -138,6 +143,7 @@
     if (eventSource) {
       eventSource.close();
     }
+    resizeObserver?.disconnect();
     terminal?.dispose();
   });
 </script>
@@ -191,7 +197,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 1.5rem;
+    padding: clamp(0.5rem, 2vw, 1.5rem);
   }
   .terminal-modal {
     background: #131e1a;
@@ -199,8 +205,10 @@
     border: 1px solid #2d4d42;
     border-radius: 16px;
     width: 100%;
-    max-width: 960px;
-    height: 85vh;
+    max-width: 1100px;
+    min-height: min(520px, calc(100dvh - 1rem));
+    height: min(85dvh, 820px);
+    max-height: calc(100dvh - 1rem);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -220,6 +228,9 @@
     display: flex;
     align-items: center;
     gap: 0.6rem;
+    flex: 1 1 420px;
+    min-width: 0;
+    flex-wrap: wrap;
   }
   .terminal-title-area h3 {
     font-size: 0.95rem;
@@ -236,7 +247,8 @@
   }
   .terminal-actions {
     display: flex;
-    gap: 0.5rem;
+    gap: 0.65rem;
+    flex-wrap: wrap;
   }
   .btn-sm {
     padding: 0.4rem 0.8rem;
@@ -269,5 +281,21 @@
     background: #131e1a;
     min-height: 0;
     overflow: hidden;
+  }
+  @media (max-width: 640px) {
+    .terminal-overlay { align-items: stretch; padding: 0; }
+    .terminal-modal { min-height: 100dvh; height: 100dvh; max-height: 100dvh; border-radius: 0; border-width: 0; }
+    .terminal-header { align-items: stretch; padding: 0.75rem; }
+    .terminal-title-area { flex-basis: 100%; }
+    .terminal-title-area h3 { flex: 1; min-width: 180px; }
+    .terminal-status-badge { width: 100%; border-radius: 6px; }
+    .terminal-actions { width: 100%; }
+    .terminal-actions .btn { flex: 1 1 130px; }
+    .terminal-instructions { padding: 0.6rem 0.75rem; max-height: 110px; overflow-y: auto; }
+    .terminal-body { padding: 0.25rem; }
+  }
+  @media (max-height: 560px) and (orientation: landscape) {
+    .terminal-instructions { display: none; }
+    .terminal-modal { min-height: calc(100dvh - 0.5rem); height: calc(100dvh - 0.5rem); }
   }
 </style>

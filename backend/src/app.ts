@@ -25,7 +25,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
-      redact: ['req.headers.authorization', 'body.password', 'body.motDePasse', 'body.secret', 'body.apiKey', 'body.token', 'body.databaseUrl', 'body.url']
+      redact: ['req.headers.authorization', 'body.password', 'body.passwordConfirmation', 'body.motDePasse', 'body.secret', 'body.apiKey', 'body.token', 'body.databaseUrl', 'body.url']
     },
     bodyLimit: config.maxUploadBytes
   });

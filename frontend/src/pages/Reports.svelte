@@ -803,6 +803,12 @@
                               on:mouseenter={() => hoveredMonthKey = item.period_month}
                               on:mouseleave={() => hoveredMonthKey = null}
                               on:click={() => selectedMonthKey = (selectedMonthKey === item.period_month ? null : item.period_month)}
+                              on:keydown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault();
+                                  selectedMonthKey = selectedMonthKey === item.period_month ? null : item.period_month;
+                                }
+                              }}
                               role="button"
                               tabindex="0"
                               aria-label="Mois {formatMonthLabel(item.period_month)}"
@@ -1049,6 +1055,12 @@
                             on:mouseenter={() => hoveredSliceId = slice.id}
                             on:mouseleave={() => hoveredSliceId = null}
                             on:click={() => selectedSliceId = (selectedSliceId === slice.id ? null : slice.id)}
+                            on:keydown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                selectedSliceId = selectedSliceId === slice.id ? null : slice.id;
+                              }
+                            }}
                             role="button"
                             tabindex="0"
                           >
@@ -1913,7 +1925,10 @@
   .responsive-svg-chart {
     width: 100%;
     height: auto;
+    min-height: 230px;
     display: block;
+    touch-action: manipulation;
+    user-select: none;
   }
 
   /* TABLES */
@@ -2012,7 +2027,8 @@
   }
 
   .month-bar-group.floating {
-    transform: translateY(-8px);
+    /* Keep the hit area stationary: moving it caused hover flicker near bar edges. */
+    transform: none;
   }
 
   .month-col-highlight {
@@ -2293,8 +2309,11 @@
   .pie-svg-element {
     width: 100%;
     max-width: 340px;
+    min-width: 0;
     height: auto;
     overflow: visible;
+    touch-action: manipulation;
+    user-select: none;
   }
 
   .pie-slices-group {
@@ -2608,6 +2627,104 @@
   .chip-val {
     color: var(--muted);
     font-weight: 700;
+  }
+
+  @media (max-width: 640px) {
+    .report-section,
+    .evolution-section-wrapper,
+    .pie-section-wrapper {
+      padding: 0.85rem;
+    }
+
+    .section-title-wrap,
+    .evolution-toolbar-row,
+    .pie-toolbar-row,
+    .month-detail-header,
+    .month-card-footer,
+    .slice-detail-header {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .chart-legend {
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 0.6rem 1rem;
+    }
+
+    .evolution-hint-text,
+    .pie-hint-text {
+      display: none;
+    }
+
+    .svg-chart-wrap {
+      overflow-x: auto;
+      padding: 0.25rem;
+    }
+
+    .responsive-svg-chart {
+      width: 720px;
+      max-width: none;
+    }
+
+    .evolution-detail-col,
+    .pie-detail-col {
+      min-height: 0;
+    }
+
+    .pie-mode-toggle {
+      display: grid;
+      grid-template-columns: 1fr;
+      width: 100%;
+      border-radius: 12px;
+    }
+
+    .btn-toggle-pill {
+      min-height: 42px;
+      white-space: normal;
+    }
+
+    .pie-chart-col {
+      padding: 0;
+    }
+
+    .pie-svg-element {
+      max-width: min(100%, 310px);
+    }
+
+    .month-detail-card,
+    .slice-detail-card,
+    .month-placeholder-card,
+    .pie-placeholder-card {
+      padding: 1rem;
+    }
+
+    .month-net-badge,
+    .slice-header-right {
+      align-items: flex-start;
+      align-self: flex-start;
+    }
+
+    .subcat-row {
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+
+    .subcat-right {
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0;
+    }
+
+    .slice-chips-list {
+      width: 100%;
+    }
+
+    .slice-chip {
+      justify-content: space-between;
+      width: 100%;
+      min-height: 40px;
+    }
   }
 
   .empty-pie-notice {

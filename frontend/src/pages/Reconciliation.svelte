@@ -551,8 +551,16 @@
                   on:dragleave={(e) => handleDragLeave(e, inv)}
                   on:drop={(e) => handleDrop(e, inv)}
                   on:click={() => handleInvoiceClick(inv)}
-                  role="region"
-                  aria-label="Zone d'association pour rapprochement"
+                  on:keydown={(event) => {
+                    if ((event.key === 'Enter' || event.key === ' ') && selectedTxForPairing) {
+                      event.preventDefault();
+                      handleInvoiceClick(inv);
+                    }
+                  }}
+                  role="button"
+                  tabindex="0"
+                  aria-disabled={!selectedTxForPairing}
+                  aria-label={selectedTxForPairing ? 'Associer cette facture à l’opération sélectionnée' : 'Zone de dépôt pour rapprochement'}
                 >
                   <div class="invoice-top">
                     <div>
@@ -1750,5 +1758,23 @@
     .detail-list {
       grid-template-columns: 1fr;
     }
+    .pairing-active-banner,.pairing-banner-info { align-items: flex-start; flex-direction: column; }
+    .pairing-active-banner .btn { width: 100%; }
+    .drag-column { padding: 0.75rem; }
+    .cards-scroller { max-height: min(460px,60dvh); }
+    .tx-card { align-items: flex-start; flex-wrap: wrap; }
+    .tx-body { flex: 1 1 calc(100% - 50px); }
+    .tx-amount-col { align-items: stretch; width: 100%; padding-left: 2.65rem; text-align: left; }
+    .pair-btn { min-height: 40px; width: 100%; }
+    .invoice-top,.invoice-meta { gap: 0.5rem; flex-wrap: wrap; }
+    .confirm-dialog,.modal-small { max-width: none; }
+    .comparison-cards { margin: 0.75rem 0; }
+    .amount-input-row { align-items: stretch; flex-wrap: wrap; }
+    .amount-input { flex: 1 1 calc(100% - 2rem); }
+    .amount-input-row .btn { width: 100%; }
+    .match-check { align-items: flex-start; }
+    .doc-preview-container { max-height: 55dvh; }
+    .doc-embed-obj { min-height: 55dvh; }
+    .preview-actions-row .btn { width: 100%; }
   }
 </style>

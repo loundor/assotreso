@@ -1165,4 +1165,17 @@
     max-height: 100%;
     object-fit: contain;
   }
+  @media (max-width: 640px) {
+    .account-card-rich { padding: 1rem; }
+    .account-card-header { flex-direction: column; gap: 1rem; }
+    .account-title-area,.account-header-right { width: 100%; min-width: 0; }
+    .account-header-right { align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; }
+    .account-tag-row,.account-card-actions,.bankin-actions-row,.contract-actions { flex-wrap: wrap; }
+    .account-details-grid { grid-template-columns: minmax(0,1fr); }
+    .oauth-section { align-items: stretch; flex-direction: column; }
+    .oauth-section .btn,.bankin-actions-row .btn { width: 100%; }
+    .contract-preview-modal { height: calc(100dvh - max(.5rem,env(safe-area-inset-top))); }
+    .contract-modal-body { min-height: 320px; }
+    .contract-name { white-space: normal; overflow-wrap: anywhere; }
+  }
 </style>

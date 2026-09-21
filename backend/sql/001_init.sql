@@ -3,7 +3,8 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   name TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'TRESORIER' CHECK (role IN ('TRESORIER', 'PRESIDENT', 'MEMBRE', 'BENEVOLE')),
+  role TEXT NOT NULL DEFAULT 'TRESORIER' CHECK (role IN ('ADMIN', 'TRESORIER', 'PRESIDENT', 'BUREAU', 'BENEVOLE')),
+  active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -332,6 +333,14 @@ ALTER TABLE association_settings ADD COLUMN IF NOT EXISTS country TEXT NOT NULL 
 ALTER TABLE association_settings ADD COLUMN IF NOT EXISTS logo_path TEXT;
 ALTER TABLE association_settings ADD COLUMN IF NOT EXISTS logo_mime TEXT;
 INSERT INTO association_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS app_settings (
+  id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  demo_mode BOOLEAN NOT NULL DEFAULT false,
+  demo_seeded_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO app_settings (id, demo_mode) VALUES (1, false) ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS association_members (
   id UUID PRIMARY KEY,

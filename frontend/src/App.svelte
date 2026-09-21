@@ -12,10 +12,13 @@
   import Shell from './components/Shell.svelte';
   import InvoiceCapture from './components/InvoiceCapture.svelte';
   import { api, clearToken, getToken } from './lib/api';
-  import type { PageId, User } from './lib/types';
+  import { getErrorMessage } from './lib/utils';
+  import type { AuthStatus, PageId, User } from './lib/types';
 
   let user: User | null = null;
   let checkingAuth = true;
+  let authStatus: AuthStatus | null = null;
+  let authError = '';
   let page: PageId = 'dashboard';
   let captureOpen = false;
   let captureMode: 'upload' | 'manual' = 'upload';
@@ -38,6 +41,30 @@
   function unauthorized() { logout(); }
   function handleHash() { page = pageFromHash(); }
   function captureSuccess() { invoiceRefresh += 1; navigate('invoices'); }
+  function authenticationSuccess(loggedUser: User) {
+    user = loggedUser;
+    authStatus = authStatus ? { ...authStatus, setupRequired: false } : authStatus;
+    navigate('dashboard');
+  }
+
+  async function initializeAuth() {
+    checkingAuth = true;
+    authError = '';
+    try {
+      authStatus = await api.authStatus();
+      if (authStatus.setupRequired) {
+        clearToken();
+        user = null;
+      } else if (getToken()) {
+        try { user = await api.me(); }
+        catch { clearToken(); user = null; }
+      }
+    } catch (error) {
+      authError = getErrorMessage(error);
+    } finally {
+      checkingAuth = false;
+    }
+  }
 
   function startCapture(mode: 'upload' | 'manual' = 'upload', direction: 'expense' | 'income' = 'expense') {
     captureMode = mode;
@@ -49,19 +76,25 @@
     page = pageFromHash();
     window.addEventListener('hashchange', handleHash);
     window.addEventListener('treso:unauthorized', unauthorized);
-    if (getToken()) { try { user = await api.me(); } catch { clearToken(); } }
+    await initializeAuth();
     page = pageFromHash();
     if (location.hash !== `#/${page}`) history.replaceState(null, '', `#/${page}`);
-    checkingAuth = false;
   });
   onDestroy(() => { window.removeEventListener('hashchange', handleHash); window.removeEventListener('treso:unauthorized', unauthorized); });
 </script>
 
 {#if checkingAuth}
   <div class="app-loading" role="status"><div class="brand"><span class="brand-mark">T</span><strong>Tréso</strong></div><span class="spinner"></span><p>Ouverture de votre espace…</p></div>
-{:else if !user}
-  <Login onSuccess={(loggedUser) => { user = loggedUser; navigate('dashboard'); }} />
-{:else}
+{:else if authError}
+  <div class="app-loading" role="alert">
+    <div class="brand"><span class="brand-mark">!</span><strong>Tréso</strong></div>
+    <strong>Impossible d’initialiser l’application</strong>
+    <p>{authError}</p>
+    <button class="btn btn-secondary" on:click={initializeAuth}>Réessayer</button>
+  </div>
+{:else if !user && authStatus}
+  <Login setupRequired={authStatus.setupRequired} demoMode={authStatus.demoMode} onSuccess={authenticationSuccess} />
+{:else if user}
   <Shell {page} {user} {navigate} openCapture={() => startCapture('upload')} {logout}>
     {#if page === 'dashboard'}<Dashboard openCapture={() => startCapture('upload')} navigate={(target) => navigate(target)} />
     {:else if page === 'accounts'}<Accounts />

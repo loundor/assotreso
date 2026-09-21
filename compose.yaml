@@ -32,6 +32,8 @@ services:
       CODEX_HOME: /app/codex-data
       PROMPTS_DIR: /app/prompts
       MIGRATION_FILE: /app/sql/001_init.sql
+      DEMO_MODE: ${DEMO_MODE:-false}
+      DEMO_SEED_FILE: /app/sql/002_demo_seed.sql
     volumes:
       - document-storage:/app/storage
       - codex-credentials:/app/codex-data

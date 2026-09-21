@@ -513,6 +513,21 @@
     color: #15803d;
     font-weight: 700;
   }
+  @media (max-width: 759px) {
+    :global(.allocation-row) {
+      grid-template-columns: 1fr !important;
+      align-items: stretch !important;
+    }
+    :global(.allocation-row > .text-button) {
+      justify-self: start;
+      min-height: 40px;
+    }
+    .hero-actions { align-items: stretch; flex-direction: column; }
+    .hero-actions .btn { width: 100%; }
+    .invoices-filter-tabs { display: grid; grid-template-columns: 1fr; width: 100%; }
+    .filter-tab { min-height: 42px; white-space: normal; }
+    .row-actions { justify-content: flex-end; }
+  }
 </style>
 
 {#if previewOpen}

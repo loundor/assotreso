@@ -10,8 +10,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/index.js",
     "test": "npm run build && node --test dist/test/*.test.js",
-    "seed:demo": "tsx src/scripts/seedDemo.ts",
-    "db:demo": "tsx src/scripts/seedDemo.ts"
+    "seed:demo": "DEMO_MODE=true tsx src/scripts/seedDemo.ts",
+    "db:demo": "DEMO_MODE=true tsx src/scripts/seedDemo.ts"
   },
   "engines": {
     "node": ">=20"

@@ -11,8 +11,8 @@
     "check": "npm --prefix backend test && npm --prefix frontend run check && npm --prefix frontend run build",
     "docker:up": "docker compose up --build",
     "docker:down": "docker compose down",
-    "seed:demo": "docker compose exec -T database psql -U tresorerie -d tresorerie < backend/sql/002_demo_seed.sql",
-    "db:demo": "docker compose exec -T database psql -U tresorerie -d tresorerie < backend/sql/002_demo_seed.sql"
+    "seed:demo": "docker compose exec -T -e DEMO_MODE=true backend node dist/src/scripts/seedDemo.js",
+    "db:demo": "docker compose exec -T -e DEMO_MODE=true backend node dist/src/scripts/seedDemo.js"
   },
   "engines": {
     "node": ">=20"

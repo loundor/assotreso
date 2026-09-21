@@ -2,7 +2,7 @@
 -- JEU DE DONNÉES DÉMO SUR 4 ANS (2023 - 2026)
 -- Association : LA SOURCE - Éco-Culture & Partage
 -- =============================================================================
-BEGIN;
+-- Ce fichier est exécuté dans la transaction gérée par le backend.
 
 -- 1. Vider les tables de données existantes
 TRUNCATE TABLE
@@ -565,7 +565,6 @@ INSERT INTO invoice_allocations (id, invoice_id, project_id, category_id, amount
 -- Audit logs
 INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details) VALUES ('10000000-0000-4000-8000-000000000001', 'DEMO_SEED', 'SYSTEM', '1', '{"dataset":"4_years_comprehensive_demo","years":["2023","2024","2025","2026"]}');
 
-COMMIT;
 -- =============================================================================
 -- FIN DU JEU DE DONNÉES DÉMO
 -- =============================================================================
